@@ -71,22 +71,35 @@ jobs:
       - name: Build Fdroid Release APK
         run: ./gradlew assembleFdroidRelease
 
-      - name: Sign Fdroid Variant APKs
-        uses: r0adkll/sign-android-release@v1
-        id: sign_app_fdroid
-        with:
-          releaseDirectory: app/build/outputs/apk/fdroid/release
-          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-
-      - name: Rename signed APK
+      - name: Sign Fdroid APK with Android Build Tools 35
         id: apk
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          ALIAS: ${{ secrets.ALIAS }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          SRC="${{ steps.sign_app_fdroid.outputs.signedReleaseFile }}"
+          set -euo pipefail
+          umask 077
+          test -n "$SIGNING_KEY"
+          test -n "$ALIAS"
+          test -n "$KEY_STORE_PASSWORD"
+          test -n "$KEY_PASSWORD"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          SRC="app/build/outputs/apk/fdroid/release/app-fdroid-universal-release-unsigned.apk"
+          ALIGNED="$RUNNER_TEMP/curbox-fdroid-aligned.apk"
+          KEYSTORE="$RUNNER_TEMP/hermes-curbox-release.jks"
           DEST="curbox-${{ steps.tag.outputs.name }}-fdroid.apk"
-          cp "$SRC" "$DEST"
+          printf '%s' "$SIGNING_KEY" | base64 --decode > "$KEYSTORE"
+          "$BUILD_TOOLS/zipalign" -f -p 4 "$SRC" "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-key-alias "$ALIAS" \
+            --ks-pass env:KEY_STORE_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            --out "$DEST" \
+            "$ALIGNED"
+          rm -f "$KEYSTORE" "$ALIGNED"
           echo "path=$DEST" >> $GITHUB_OUTPUT
 
       - name: Verify and document signed APK
