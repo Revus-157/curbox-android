@@ -15,7 +15,7 @@ of this repo; read its `MainActivity.kt` alongside this doc.
 - **Identity:** the calling app's verified UID, resolved to its package. No tokens.
 - **Permission:** the user approves your app from a dialog Curbox shows. They can remove access any
   time under **Reducers → Curbox API → Connected apps**, or turn the whole API off with one switch.
-- **API version:** `2` (call `apiVersion()` to check).
+- **API version:** `3` (call `apiVersion()` to check).
 
 ---
 
@@ -37,6 +37,7 @@ interface ICurboxApi {
     String execute(String command, in Bundle args);
     String query(String state);
     String list(String kind);
+    String queryData(String dataset, in Bundle args);
 }
 ```
 
@@ -125,7 +126,7 @@ state any time with `api.isGranted` (false when the user has not allowed you, ha
 has turned the whole API off).
 
 > Binder calls run on a pool thread and may block briefly while Curbox writes its settings. Call
-> `execute`, `query` and `list` off your main thread.
+> `execute`, `query`, `list` and `queryData` off your main thread.
 
 ---
 
@@ -190,6 +191,39 @@ api?.list("FOCUS_GROUPS")
 // [{"id":"a1b2...","name":"Study","apps":12,"websites":3,"blockMode":"BLOCK_SELECTED","exitable":true,"autoTurnOnDnd":false}]
 ```
 
+## 8. Read bounded data: `queryData(dataset, args)`
+
+API version 3 adds bounded access to aggregated usage data. It returns a JSON object, or `null`
+when the caller is not allowed, the data set is unknown, or the arguments are invalid.
+
+| Dataset | Args | Result |
+| --- | --- | --- |
+| `APP_USAGE` | optional inclusive `start_date` and `end_date` in ISO `YYYY-MM-DD` format | Package-level daily and hourly usage rows |
+| `WEBSITE_USAGE` | optional inclusive `start_date` and `end_date` in ISO `YYYY-MM-DD` format | Domain-only daily and hourly usage rows |
+
+The default range is today and yesterday. A request may cover at most 31 days. Curbox aggregates
+all browser packages and URL paths to their normalized domain before returning data. It never
+returns paths, query parameters, page titles, or address-bar search text through this API.
+
+Because API v3 adds these sensitive read capabilities, grants created by an older API version do
+not carry over silently. The user must approve the client again after upgrading Curbox.
+
+`APP_USAGE` rows contain `date`, `packageName`, `durationMs`, 24 `hourlyMs` buckets,
+`unbucketedDurationMs`, `launchCount`, and `lastUsedMs`. `WEBSITE_USAGE` rows contain the same
+time fields plus `domain` and `lastVisitedMs`. Both data sets require the user's explicit Curbox
+API grant.
+
+```kotlin
+val usage = api?.queryData("WEBSITE_USAGE", Bundle().apply {
+    putString("start_date", "2026-09-01")
+    putString("end_date", "2026-09-05")
+})
+// {"schemaVersion":1,"privacyMode":"domain_only","startDate":"2026-09-01",
+//  "endDate":"2026-09-05","timeZone":"Europe/Berlin","rows":[{"date":"2026-09-05","domain":"youtube.com",
+//  "durationMs":180000,"hourlyMs":[0,...],"unbucketedDurationMs":0,
+//  "lastVisitedMs":1788600000000}]}
+```
+
 ---
 
 ## End to end example
@@ -219,7 +253,7 @@ api?.query("FOCUS_ACTIVE")                         // confirm: {"active":"true",
   user allowed grants the whole UID.
 - **Be ready for `DENIED`/`null`.** The user can remove your app or switch the API off at any moment.
 - **Versioning.** Check `apiVersion()` if you depend on newer features. `list()` arrived in version
-  2.
+  2 and `queryData()` arrived in version 3.
 
 ## Try it with the bundled tester
 

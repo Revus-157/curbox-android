@@ -15,9 +15,11 @@ object ApiAuthStore {
     private const val PREFS = "AppPreferences"
     private const val KEY_ENABLED = "apiEnabled"
     private const val KEY_GRANTS = "apiAuthorizedPackages"
+    private const val KEY_GRANT_VERSIONS = "apiAuthorizedPackageVersions"
 
     private val gson = Gson()
     private val mapType = object : TypeToken<MutableMap<String, Long>>() {}.type
+    private val versionMapType = object : TypeToken<MutableMap<String, Int>>() {}.type
 
     private fun prefs(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -29,12 +31,29 @@ object ApiAuthStore {
     }
 
     /** Package -> time it was allowed, in millis. */
-    fun grants(context: Context): Map<String, Long> {
+    private fun storedGrants(context: Context): Map<String, Long> {
         val raw = prefs(context).getString(KEY_GRANTS, null) ?: return emptyMap()
         return try {
             gson.fromJson(raw, mapType) ?: emptyMap()
         } catch (e: Exception) {
             emptyMap()
+        }
+    }
+
+    private fun grantVersions(context: Context): Map<String, Int> {
+        val raw = prefs(context).getString(KEY_GRANT_VERSIONS, null) ?: return emptyMap()
+        return try {
+            gson.fromJson(raw, versionMapType) ?: emptyMap()
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    /** Only grants approved for this API's current capability set are effective. */
+    fun grants(context: Context): Map<String, Long> {
+        val versions = grantVersions(context)
+        return storedGrants(context).filterKeys {
+            (versions[it] ?: 0) >= CurboxApiContract.API_VERSION
         }
     }
 
@@ -48,18 +67,25 @@ object ApiAuthStore {
     }
 
     fun grant(context: Context, packageName: String) {
-        val updated = grants(context).toMutableMap()
+        val updated = storedGrants(context).toMutableMap()
         updated[packageName] = System.currentTimeMillis()
-        save(context, updated)
+        val versions = grantVersions(context).toMutableMap()
+        versions[packageName] = CurboxApiContract.API_VERSION
+        save(context, updated, versions)
     }
 
     fun revoke(context: Context, packageName: String) {
-        val updated = grants(context).toMutableMap()
+        val updated = storedGrants(context).toMutableMap()
         updated.remove(packageName)
-        save(context, updated)
+        val versions = grantVersions(context).toMutableMap()
+        versions.remove(packageName)
+        save(context, updated, versions)
     }
 
-    private fun save(context: Context, map: Map<String, Long>) {
-        prefs(context).edit().putString(KEY_GRANTS, gson.toJson(map)).apply()
+    private fun save(context: Context, map: Map<String, Long>, versions: Map<String, Int>) {
+        prefs(context).edit()
+            .putString(KEY_GRANTS, gson.toJson(map))
+            .putString(KEY_GRANT_VERSIONS, gson.toJson(versions))
+            .apply()
     }
 }

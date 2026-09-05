@@ -19,6 +19,9 @@ import neth.iecal.curbox.utils.DataStoreManager
 import neth.iecal.curbox.utils.DndHelper
 import neth.iecal.curbox.utils.TimeTools
 import kotlinx.coroutines.flow.first
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
 /**
  * Turns an API command into a real change in Curbox.
@@ -282,4 +285,51 @@ object CurboxApiCommands {
             }
         }
     }
+
+    /** Reads a bounded data set without exposing Curbox's private database directly. */
+    suspend fun queryData(context: Context, datasetName: String?, args: Bundle): Any? {
+        val dataset = ApiDataset.fromNameOrNull(datasetName) ?: return null
+        val today = LocalDate.now()
+        val end = parseDateArgument(args, CurboxApiContract.ARG_END_DATE) ?: today
+        val start = parseDateArgument(args, CurboxApiContract.ARG_START_DATE)
+            ?: end.minusDays(DEFAULT_USAGE_DAYS - 1L)
+        require(!start.isAfter(end)) { "start_date must not be after end_date" }
+        require(ChronoUnit.DAYS.between(start, end) < MAX_USAGE_DAYS) {
+            "usage range exceeds $MAX_USAGE_DAYS days"
+        }
+
+        val dates = generateSequence(start) { date ->
+            date.plusDays(1).takeUnless { it.isAfter(end) }
+        }.toList()
+        val nativeToIso = dates.associate { TimeTools.dayKey(it) to it.toString() }
+        val database = AppDatabase.getInstance(context.applicationContext)
+        return when (dataset) {
+            ApiDataset.APP_USAGE -> UsageDataApi.aggregateApps(
+                rows = database.appUsageDao().getForDates(nativeToIso.keys.toList()),
+                nativeToIsoDate = nativeToIso,
+                startDate = start.toString(),
+                endDate = end.toString(),
+                timeZone = ZoneId.systemDefault().id,
+            )
+            ApiDataset.WEBSITE_USAGE -> {
+                val rows = database.websiteStatsDao().getStatsForDates(nativeToIso.keys.toList())
+                WebsiteUsageApi.aggregate(
+                    rows = rows,
+                    nativeToIsoDate = nativeToIso,
+                    startDate = start.toString(),
+                    endDate = end.toString(),
+                    timeZone = ZoneId.systemDefault().id,
+                )
+            }
+        }
+    }
+
+    private fun parseDateArgument(args: Bundle, key: String): LocalDate? {
+        val raw = args.getString(key) ?: return null
+        return runCatching { LocalDate.parse(raw) }
+            .getOrElse { throw IllegalArgumentException("$key must be ISO YYYY-MM-DD", it) }
+    }
+
+    private const val DEFAULT_USAGE_DAYS = 2
+    private const val MAX_USAGE_DAYS = 31
 }

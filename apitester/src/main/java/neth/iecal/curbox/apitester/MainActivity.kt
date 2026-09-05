@@ -217,6 +217,13 @@ class MainActivity : AppCompatActivity() {
                 val res = runCatching { a.query(state) }.getOrElse { "ERROR: ${it.message}" }
                 log("$state -> ${pretty(res)}")
             }
+            if (runCatching { a.apiVersion() }.getOrDefault(0) >= 3) {
+                for (dataset in listOf("APP_USAGE", "WEBSITE_USAGE")) {
+                    val res = runCatching { a.queryData(dataset, Bundle()) }
+                        .getOrElse { "ERROR: ${it.message}" }
+                    log("$dataset ->\n${pretty(res)}")
+                }
+            }
             log("================ END DUMP ================")
         }
     }
