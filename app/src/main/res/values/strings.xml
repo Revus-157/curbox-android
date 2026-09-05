@@ -1431,7 +1431,7 @@
 
     <!-- Curbox API permission screen -->
     <string name="api_permission_title">Allow access?</string>
-    <string name="api_permission_message">%1$s wants to control Curbox. It can start focus sessions, turn blockers on or off, and read your screen time. You can remove this any time.</string>
+    <string name="api_permission_message">%1$s wants to control Curbox. It can start focus sessions, turn blockers on or off, and read hourly app-package and website-domain usage totals. URL paths, page titles, and search text are not shared. You can remove this any time.</string>
     <string name="api_permission_allow">Allow</string>
     <string name="api_permission_deny">Deny</string>
 

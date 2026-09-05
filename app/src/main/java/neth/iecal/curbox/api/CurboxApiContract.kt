@@ -9,12 +9,14 @@ package neth.iecal.curbox.api
  */
 object CurboxApiContract {
 
-    const val API_VERSION = 2
+    const val API_VERSION = 3
 
     // Argument keys placed in the Bundle passed to execute().
     const val ARG_TARGET = "target"
     const val ARG_ENABLE = "enable"
     const val ARG_MINUTES = "minutes"
+    const val ARG_START_DATE = "start_date"
+    const val ARG_END_DATE = "end_date"
 
     // Keys used in the JSON returned by query().
     const val VAR_FOCUS_GROUP = "focus_group"
@@ -74,5 +76,15 @@ enum class ApiList {
 
     companion object {
         fun fromNameOrNull(name: String?): ApiList? = entries.firstOrNull { it.name == name }
+    }
+}
+
+/** Bounded data sets a client can read with queryData(). */
+enum class ApiDataset {
+    APP_USAGE,
+    WEBSITE_USAGE;
+
+    companion object {
+        fun fromNameOrNull(name: String?): ApiDataset? = entries.firstOrNull { it.name == name }
     }
 }

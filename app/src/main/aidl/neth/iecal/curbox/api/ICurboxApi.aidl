@@ -23,4 +23,8 @@ interface ICurboxApi {
     // AUTO_DND_GROUPS, UI_HIDER_SCRIPTS or STATUS. Returns a JSON array (or object for STATUS),
     // or null when not allowed or the kind is unknown.
     String list(String kind);
+
+    // Reads a bounded data set with arguments. API v3 adds WEBSITE_USAGE with inclusive ISO-8601
+    // start_date and end_date arguments. Returns a JSON object, or null when denied or unknown.
+    String queryData(String dataset, in Bundle args);
 }

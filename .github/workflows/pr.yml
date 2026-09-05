@@ -1,4 +1,4 @@
-name: PR Build CI
+name: PR CI
 
 on:
   pull_request:
@@ -14,20 +14,24 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4.2.1
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: Give permission to executable
         run: chmod +x gradlew
 
-      - name: Clear build cache
-        uses: gradle/gradle-build-action@v3.1.0
-        with:
-          gradle-version: wrapper
-          arguments: clean
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run Curbox API unit tests
+        run: |
+          ./gradlew testFullDebugUnitTest \
+            --tests neth.iecal.curbox.api.UsageDataApiTest \
+            --tests neth.iecal.curbox.api.WebsiteUsageApiTest \
+            --tests neth.iecal.curbox.data.db.WebsiteHourlyUsageCodecTest
 
       - name: Build Fdroid Debug APK
         run: ./gradlew assembleFdroidDebug

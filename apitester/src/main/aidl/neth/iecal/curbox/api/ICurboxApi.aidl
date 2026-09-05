@@ -9,4 +9,5 @@ interface ICurboxApi {
     String execute(String command, in Bundle args);
     String query(String state);
     String list(String kind);
+    String queryData(String dataset, in Bundle args);
 }

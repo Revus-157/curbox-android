@@ -66,6 +66,19 @@ class CurboxApiService : Service() {
                 null
             }
         }
+
+        override fun queryData(dataset: String?, args: Bundle?): String? {
+            if (!callerAllowed()) return null
+            return try {
+                val data = runBlocking {
+                    CurboxApiCommands.queryData(applicationContext, dataset, args ?: Bundle())
+                } ?: return null
+                gson.toJson(data)
+            } catch (e: Exception) {
+                Log.e(TAG, "queryData failed for $dataset", e)
+                null
+            }
+        }
     }
 
     private fun callerAllowed(): Boolean {
