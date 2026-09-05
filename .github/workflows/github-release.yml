@@ -3,7 +3,7 @@ name: GitHub Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*-hermes.*'
   workflow_dispatch:
     inputs:
       tag:
@@ -60,16 +60,13 @@ jobs:
         uses: android-actions/setup-android@v2
 
       - name: Install Android Build Tools
-        run: sdkmanager "build-tools;29.0.3"
+        run: sdkmanager "build-tools;35.0.0"
 
       - name: Give permission to executable
         run: chmod +x gradlew
 
-      - name: Clear build cache
-        uses: gradle/gradle-build-action@v3.1.0
-        with:
-          gradle-version: wrapper
-          arguments: clean
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Build Fdroid Release APK
         run: ./gradlew assembleFdroidRelease
@@ -92,6 +89,22 @@ jobs:
           cp "$SRC" "$DEST"
           echo "path=$DEST" >> $GITHUB_OUTPUT
 
+      - name: Verify and document signed APK
+        id: release_info
+        run: |
+          APK="${{ steps.apk.outputs.path }}"
+          INFO="curbox-${{ steps.tag.outputs.name }}-release-info.txt"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          {
+            echo "Release: ${{ steps.tag.outputs.name }}"
+            echo "APK: $APK"
+            echo "SHA-256: $(sha256sum "$APK" | cut -d' ' -f1)"
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK" \
+              | grep -E '^Signer #1 certificate SHA-256 digest:'
+          } > "$INFO"
+          cat "$INFO"
+          echo "path=$INFO" >> $GITHUB_OUTPUT
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -100,6 +113,8 @@ jobs:
           body: ${{ steps.desc.outputs.body }}
           draft: false
           prerelease: false
-          files: ${{ steps.apk.outputs.path }}
+          files: |
+            ${{ steps.apk.outputs.path }}
+            ${{ steps.release_info.outputs.path }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

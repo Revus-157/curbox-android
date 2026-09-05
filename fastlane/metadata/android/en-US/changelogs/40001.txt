@@ -1,0 +1,5 @@
+Adds an explicitly approved Curbox API v3 connection for trusted companion apps.
+
+Companion apps can read bounded daily and hourly app usage by package name. They can also read website usage by domain. Curbox never shares page paths, page titles, query parameters, or search text through this API.
+
+Existing Curbox API permissions must be approved again after this update.
