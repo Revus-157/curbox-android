@@ -215,3 +215,7 @@ Use the check that matches the change. Documentation only changes do not need a 
 - `CONTRIBUTING.md`: contributor workflows
 - `CURBOX_API.md`: API contract and integration guide
 - `Readme.md`: product overview
+
+## Isolated development and public boundaries
+
+Use a dedicated feature worktree and keep API grants, schema versions and signing compatibility explicit. Never commit private operational inventories, telemetry, task reports or credentials to this public repository. A build or emulator pass does not establish owner-device acceptance.
