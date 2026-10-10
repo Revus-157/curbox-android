@@ -1,0 +1,3 @@
+Website tracking now follows the browser in the foreground instead of unrelated notification events.
+Full screen browsing keeps the current website session. Leaving the browser or turning off the screen stops the timer.
+Existing settings, website history and API approvals are preserved.

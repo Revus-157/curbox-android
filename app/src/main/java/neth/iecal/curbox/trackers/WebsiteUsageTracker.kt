@@ -1,15 +1,23 @@
 package neth.iecal.curbox.trackers
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.app.KeyguardManager
+import android.os.PowerManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
-import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import neth.iecal.curbox.data.db.AppDatabase
 import neth.iecal.curbox.data.db.WebsiteStatsDao
@@ -34,25 +42,47 @@ class WebsiteUsageTracker {
 
     private lateinit var service: BaseBlockingService
     private lateinit var websiteStatsDao: WebsiteStatsDao
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val observerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val persistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // All timing state is read and written on the main thread (accessibility
     // events, the heartbeat and rechecks all post here) so it never races.
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private var currentPackage: String? = null
-    private var currentDomain: String? = null
-    private var currentUrlIdentifier: String? = null
-    private var domainStartTimeMs: Long = 0L
+    private lateinit var session: WebsiteForegroundSession
     private var onWebsiteObserved: (WebsiteObservation?) -> Unit = {}
 
     private var recheckJob: Job? = null
-    @Volatile private var trackingEnabled = true
+    private var screenReceiverRegistered = false
+    @Volatile private var destroyed = false
 
     private val heartbeat = object : Runnable {
         override fun run() {
-            saveSession()
+            if (destroyed) return
+            refreshForegroundApplication()
+            applyTransition(session.checkpoint(SystemClock.uptimeMillis()))
             mainHandler.postDelayed(this, HEARTBEAT_MS)
+        }
+    }
+
+    private val resumeAfterUnlock = Runnable { refreshForegroundApplication() }
+
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    mainHandler.removeCallbacks(resumeAfterUnlock)
+                    applyTransition(session.onScreenOff(SystemClock.uptimeMillis()))
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    if (isScreenAvailable()) session.onScreenOn()
+                }
+                Intent.ACTION_USER_PRESENT -> {
+                    session.onScreenOn()
+                    mainHandler.removeCallbacks(resumeAfterUnlock)
+                    mainHandler.postDelayed(resumeAfterUnlock, 300L)
+                }
+            }
         }
     }
 
@@ -64,21 +94,19 @@ class WebsiteUsageTracker {
         this.onWebsiteObserved = onWebsiteObserved
         val db = AppDatabase.getInstance(service)
         this.websiteStatsDao = db.websiteStatsDao()
+        val powerManager = service.getSystemService(Context.POWER_SERVICE) as PowerManager
+        session = WebsiteForegroundSession(screenOn = powerManager.isInteractive && isScreenAvailable())
+        registerScreenReceiver()
         startObservingRecheckTime()
         mainHandler.postDelayed(heartbeat, HEARTBEAT_MS)
     }
 
     private fun startObservingRecheckTime() {
-        scope.launch {
+        observerScope.launch {
             service.dataStoreManager.settings.collect { settings ->
                 val enabled = settings.isWebsiteUsageTrackingEnabled
-                val wasEnabled = trackingEnabled
-                trackingEnabled = enabled
                 mainHandler.post {
-                    when {
-                        !enabled -> pauseUsageSession()
-                        !wasEnabled -> resumeUsageSession()
-                    }
+                    applyTransition(session.setTrackingEnabled(enabled, SystemClock.uptimeMillis()))
                 }
                 val nextRecheck = settings.nextWebsiteRecheckTime
                 if (nextRecheck > System.currentTimeMillis()) {
@@ -90,13 +118,13 @@ class WebsiteUsageTracker {
 
     private fun scheduleRecheck(recheckTime: Long) {
         recheckJob?.cancel()
-        recheckJob = scope.launch {
+        recheckJob = observerScope.launch {
             val delayMs = recheckTime - System.currentTimeMillis()
             if (delayMs > 0) {
                 kotlinx.coroutines.delay(delayMs)
                 Log.d("WebsiteUsageTracker", "Executing scheduled recheck")
                 mainHandler.post {
-                    saveSession()
+                    applyTransition(session.checkpoint(SystemClock.uptimeMillis()))
                     emitCurrentObservation()
                 }
             }
@@ -106,7 +134,6 @@ class WebsiteUsageTracker {
     private fun filterOutUrlFromPlainText(inputText: String?): String? {
         if (inputText.isNullOrBlank()) return null
 
-        Log.d("website", "filtering url $inputText")
         val urlRegex = Regex(
             pattern = """(?:https?://|www\.)?[^\s<>\"']+""",
             option = RegexOption.IGNORE_CASE
@@ -134,14 +161,32 @@ class WebsiteUsageTracker {
         return null
     }
     fun onEvent(event: AccessibilityEvent?) {
-        if (event == null) return
-        
-        val packageName = event.packageName?.toString() ?: return
-        
-        if (!URL_BAR_ID_LIST.containsKey(packageName)) {
-            mainHandler.post { leaveCurrentWebsite() }
-            return
+        if (event == null || destroyed) return
+
+        val rootNode = service.rootInActiveWindow
+        val foregroundPackage = findForegroundApplicationPackage(
+            rootNode?.packageName?.toString(),
+            rootNode?.window?.type
+        )
+        if (foregroundPackage != null) {
+            mainHandler.post {
+                if (destroyed) return@post
+                if (!isScreenAvailable()) {
+                    applyTransition(session.onScreenOff(SystemClock.uptimeMillis()))
+                    return@post
+                }
+                session.onScreenOn()
+                applyTransition(
+                    session.onForegroundApplication(foregroundPackage, SystemClock.uptimeMillis())
+                )
+            }
         }
+
+        val packageName = event.packageName?.toString() ?: return
+        if (!URL_BAR_ID_LIST.containsKey(packageName)) return
+        // A queued browser event must not resurrect or replace a session after
+        // another application has become the foreground window.
+        if (foregroundPackage != packageName) return
 
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
             event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
@@ -151,11 +196,10 @@ class WebsiteUsageTracker {
             return
         }
 
-        val rootNode = service.rootInActiveWindow ?: return
+        rootNode ?: return
         val urlBarInfo = URL_BAR_ID_LIST[packageName] ?: return
 
 
-        Log.d("w source node",event.source.toString())
         try {
             val nodes = AccessibilityHelper.findElementById(
                 rootNode,
@@ -164,7 +208,6 @@ class WebsiteUsageTracker {
                 event.source,
                 urlBarInfo.displayUrlBarId
             ) ?: return
-            Log.d("found node",nodes.toString())
             val text = (nodes.text ?: nodes.contentDescription).toString()
 
             if (text.isNotEmpty()) {
@@ -182,44 +225,92 @@ class WebsiteUsageTracker {
     private data class SiteInfo(val domain: String, val urlIdentifier: String)
     private data class HourSlice(val date: String, val hour: Int, val durationMs: Long)
 
-    private fun observeWebsite(packageName: String, siteInfo: SiteInfo) {
-        if (siteInfo.urlIdentifier == currentUrlIdentifier && packageName == currentPackage) return
+    private fun applyTransition(transition: WebsiteSessionTransition) {
+        if (destroyed) return
+        transition.commits.forEach(::saveSession)
+        when (val change = transition.observationChange) {
+            WebsiteObservationChange.None -> Unit
+            WebsiteObservationChange.Cleared -> onWebsiteObserved(null)
+            is WebsiteObservationChange.Observed -> {
+                val website = change.website
+                onWebsiteObserved(
+                    WebsiteObservation(website.packageName, website.domain, website.urlIdentifier)
+                )
+                saveInitialSession(website)
+            }
+        }
+    }
 
-        Log.d("saving session", siteInfo.urlIdentifier)
-        saveSession()
-        currentDomain = siteInfo.domain
-        currentUrlIdentifier = siteInfo.urlIdentifier
-        currentPackage = packageName
-        domainStartTimeMs = if (trackingEnabled) SystemClock.uptimeMillis() else 0L
-        emitCurrentObservation()
-        saveInitialSession()
+    private fun findForegroundApplicationPackage(
+        activeRootPackage: String?,
+        activeRootWindowType: Int?
+    ): String? {
+        val windows = try {
+            service.windows
+                .map {
+                    WebsiteWindowEvidence(
+                        packageName = it.root?.packageName?.toString(),
+                        isApplication = it.type == AccessibilityWindowInfo.TYPE_APPLICATION,
+                        isActive = it.isActive,
+                        isFocused = it.isFocused
+                    )
+                }
+        } catch (_: Exception) {
+            emptyList()
+        }
+        return selectForegroundApplication(
+            windows = windows,
+            activeRootPackage = activeRootPackage,
+            activeRootIsApplication = activeRootWindowType == AccessibilityWindowInfo.TYPE_APPLICATION,
+            isSupportedBrowser = URL_BAR_ID_LIST::containsKey
+        )
+    }
+
+    private fun refreshForegroundApplication() {
+        if (destroyed) return
+        if (!isScreenAvailable()) {
+            applyTransition(session.onScreenOff(SystemClock.uptimeMillis()))
+            return
+        }
+        session.onScreenOn()
+        val root = try {
+            service.rootInActiveWindow
+        } catch (_: Exception) {
+            null
+        }
+        val foreground = findForegroundApplicationPackage(
+            root?.packageName?.toString(),
+            root?.window?.type
+        ) ?: return
+        applyTransition(session.onForegroundApplication(foreground, SystemClock.uptimeMillis()))
+    }
+
+    private fun isScreenAvailable(): Boolean {
+        val power = service.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val keyguard = service.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        return power.isInteractive && !keyguard.isKeyguardLocked
+    }
+
+    private fun registerScreenReceiver() {
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_USER_PRESENT)
+        }
+        service.registerReceiver(screenReceiver, filter)
+        screenReceiverRegistered = true
+    }
+
+    private fun observeWebsite(packageName: String, siteInfo: SiteInfo) {
+        if (destroyed || !isScreenAvailable()) return
+        val observed = TrackedWebsite(packageName, siteInfo.domain, siteInfo.urlIdentifier)
+        applyTransition(session.observe(observed, SystemClock.uptimeMillis()))
     }
 
     private fun emitCurrentObservation() {
-        val packageName = currentPackage ?: return
-        val domain = currentDomain ?: return
-        val urlIdentifier = currentUrlIdentifier ?: return
-        onWebsiteObserved(WebsiteObservation(packageName, domain, urlIdentifier))
-    }
-
-    private fun leaveCurrentWebsite() {
-        if (currentPackage == null) return
-        saveSession()
-        currentPackage = null
-        currentDomain = null
-        currentUrlIdentifier = null
-        domainStartTimeMs = 0L
-        onWebsiteObserved(null)
-    }
-
-    private fun pauseUsageSession() {
-        domainStartTimeMs = 0L
-    }
-
-    private fun resumeUsageSession() {
-        if (currentPackage == null || currentDomain == null || currentUrlIdentifier == null) return
-        domainStartTimeMs = SystemClock.uptimeMillis()
-        saveInitialSession()
+        session.currentWebsite()?.let {
+            onWebsiteObserved(WebsiteObservation(it.packageName, it.domain, it.urlIdentifier))
+        }
     }
 
     private fun splitByLocalHour(startMs: Long, endMs: Long): List<HourSlice> {
@@ -266,17 +357,12 @@ class WebsiteUsageTracker {
     }
 
 
-    private fun saveInitialSession() {
-        if (!trackingEnabled) return
-        val domain = currentDomain
-        val identifier = currentUrlIdentifier
-        val packageName = currentPackage
-
-        if (domain != null && identifier != null && packageName != null) {
+    private fun saveInitialSession(website: TrackedWebsite) {
+        if (!session.trackingEnabled) return
+        with(website) {
             val date = TimeTools.getCurrentDate()
             val wallNow = System.currentTimeMillis()
-            scope.launch {
-                if (!trackingEnabled) return@launch
+            persistenceScope.launch {
                 try {
                     // Make the row visible immediately without ever touching
                     // totalTime, so an in flight time increment is never clobbered.
@@ -284,13 +370,13 @@ class WebsiteUsageTracker {
                         WebsiteStatsEntity(
                             date = date,
                             packageName = packageName,
-                            urlIdentifier = identifier,
+                            urlIdentifier = urlIdentifier,
                             domain = domain,
                             totalTime = 0L,
                             lastVisited = wallNow
                         )
                     )
-                    websiteStatsDao.touch(date, packageName, identifier, wallNow)
+                    websiteStatsDao.touch(date, packageName, urlIdentifier, wallNow)
                 } catch (e: Exception) {
                     Log.e("WebsiteUsageTracker", "Failed to save initial website trace", e)
                 }
@@ -298,30 +384,12 @@ class WebsiteUsageTracker {
         }
     }
 
-    private fun saveSession() {
-        if (!trackingEnabled) return
-        val domain = currentDomain
-        val identifier = currentUrlIdentifier
-        val packageName = currentPackage
-        val startTime = domainStartTimeMs
-
-        if (domain == null || identifier == null || packageName == null || startTime <= 0) return
-
-        val now = SystemClock.uptimeMillis()
-        val durationMs = now - startTime
-        // Advance the clock so repeated commits (rechecks, leaving the browser)
-        // never double count the same span.
-        domainStartTimeMs = now
-
-        // Conserve every slice instead of discarding short ones. Browsers like
-        // Firefox change the address bar text many times a second, so the elapsed
-        // time arrives in sub second pieces that must be accumulated, not dropped.
-        if (durationMs <= 0) return
-
+    private fun saveSession(commit: WebsiteUsageCommit) {
+        val (website, durationMs) = commit
+        val (packageName, domain, identifier) = website
         val wallNow = System.currentTimeMillis()
         val wallStart = (wallNow - durationMs).coerceAtMost(wallNow)
-        scope.launch {
-            if (!trackingEnabled) return@launch
+        persistenceScope.launch {
             try {
                 splitByLocalHour(wallStart, wallNow).forEach { slice ->
                     val entity = WebsiteStatsEntity(
@@ -333,7 +401,6 @@ class WebsiteUsageTracker {
                         lastVisited = wallNow
                     )
                     websiteStatsDao.insertIfAbsent(entity)
-                    Log.d("saving session", entity.toString())
                     websiteStatsDao.addTime(
                         slice.date,
                         packageName,
@@ -350,8 +417,28 @@ class WebsiteUsageTracker {
     }
 
     fun onDestroy() {
+        mainHandler.removeCallbacks(heartbeat)
+        mainHandler.removeCallbacks(resumeAfterUnlock)
         recheckJob?.cancel()
-        saveSession()
-        onWebsiteObserved(null)
+        applyTransition(session.destroy(SystemClock.uptimeMillis()))
+        destroyed = true
+        if (screenReceiverRegistered) {
+            try {
+                service.unregisterReceiver(screenReceiver)
+            } catch (_: Exception) {
+            }
+            screenReceiverRegistered = false
+        }
+        observerScope.cancel()
+        // Drain finite database writes off the service main thread. Infinite
+        // settings observers belong to the separately cancelled observer scope.
+        val pendingWrites = persistenceScope.coroutineContext[Job]?.children?.toList().orEmpty()
+        persistenceScope.launch {
+            try {
+                pendingWrites.joinAll()
+            } finally {
+                persistenceScope.cancel()
+            }
+        }
     }
 }
