@@ -1753,6 +1753,8 @@
     <string name="website_usage_tracking">Website Usage Tracking</string>
     <string name="usage_tracking_disabled_warning">Warning: Usage Based blocking options will not work for a tracking type while it is turned off.</string>
 
+    <string name="managed_policy_warning_message">This content is blocked by an active protection rule.</string>
+
     <!-- Units -->
     <string name="unit_minutes">Minutes</string>
     <string name="unit_hours">Hours</string>

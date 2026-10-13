@@ -12,6 +12,7 @@ data class ManagedGroupPolicy(
 )
 
 const val MANAGED_GROUP_PREFIX = "api-managed:"
+internal const val MANAGED_WARNING_MESSAGE = "curbox:managed-protection-message"
 
 fun replaceManagedPolicies(base: Settings, requested: List<ManagedGroupPolicy>, owner: String, nowMs: Long): Settings {
     require(owner.isNotBlank() && owner.length<=200)
@@ -37,12 +38,12 @@ fun effectiveManagedSettings(base: Settings, nowMs: Long): Settings {
     val apps=active.filter { it.kind=="app_group" }.map {
         AppGroup(id=MANAGED_GROUP_PREFIX+it.ownerPackage+":"+it.id,name=it.name+" (managed)",selectedPackages=it.members,
             config=hard,isActive=true,
-            warningScreenConfig=AppBlockerWarningScreenConfig(isProceedDisabled=true))
+            warningScreenConfig=AppBlockerWarningScreenConfig(message=MANAGED_WARNING_MESSAGE,isProceedDisabled=true))
     }
     val keywords=active.filter { it.kind=="keyword_group" }.map {
         KeywordGroup(id=MANAGED_GROUP_PREFIX+it.ownerPackage+":"+it.id,name=it.name+" (managed)",selectedKeywords=it.members,
             config=hard,isActive=true,
-            warningScreenConfig=AppBlockerWarningScreenConfig(isProceedDisabled=true))
+            warningScreenConfig=AppBlockerWarningScreenConfig(message=MANAGED_WARNING_MESSAGE,isProceedDisabled=true))
     }
     return base.copy(
         blockedAppGroups=base.blockedAppGroups.filterNot { it.id.startsWith(MANAGED_GROUP_PREFIX) }+apps,

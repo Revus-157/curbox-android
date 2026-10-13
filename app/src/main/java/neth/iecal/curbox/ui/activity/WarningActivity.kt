@@ -44,6 +44,10 @@ import androidx.core.content.edit
 import androidx.core.widget.doAfterTextChanged
 import com.google.android.material.color.MaterialColors
 import neth.iecal.curbox.anti_stimulants.MindfulMessage
+import neth.iecal.curbox.data.models.MANAGED_WARNING_MESSAGE
+
+internal fun resolveWarningMessage(message: String, managedMessage: () -> String): String =
+    if (message == MANAGED_WARNING_MESSAGE) managedMessage() else message
 
 class WarningActivity : AppCompatActivity() {
 
@@ -280,7 +284,9 @@ class WarningActivity : AppCompatActivity() {
             }
             .show()
 
-        binding.warningMsg.text = warningScreenConfig.message
+        binding.warningMsg.text = resolveWarningMessage(warningScreenConfig.message) {
+            getString(R.string.managed_policy_warning_message)
+        }
 
         if (warningScreenConfig.isOnOpenConfig) {
             binding.minsPicker.visibility = View.GONE
