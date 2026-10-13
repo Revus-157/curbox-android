@@ -295,7 +295,9 @@ object CurboxApiCommands {
                     "keywordBlocker" to settings.keywordBlockerConfig.isActive,
                     "reelBlocker" to settings.reelBlockerConfig.isActive,
                     "reelCounter" to settings.isReelCounterOn,
-                    "uiHider" to (BuildConfig.SUPPORTS_UI_HIDER && settings.uiHiderConfig.isActive)
+                    "uiHider" to (BuildConfig.SUPPORTS_UI_HIDER && settings.uiHiderConfig.isActive),
+                    "mediaControlGranted" to ManagedMediaCapability.isGranted(app),
+                    "managedMediaControl" to ManagedMediaCapability.status(app)
                 )
             }
         }

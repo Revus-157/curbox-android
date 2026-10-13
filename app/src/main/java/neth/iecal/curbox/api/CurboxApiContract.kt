@@ -9,7 +9,7 @@ package neth.iecal.curbox.api
  */
 object CurboxApiContract {
 
-    const val API_VERSION = 4
+    const val API_VERSION = 5
 
     // Argument keys placed in the Bundle passed to execute().
     const val ARG_TARGET = "target"
