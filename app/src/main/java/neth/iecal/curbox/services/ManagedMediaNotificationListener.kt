@@ -254,6 +254,10 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
     }
 
     private fun isTargeted(controller: MediaController): Boolean {
+        // Settings are authoritative even with no accessibility host or current browser URI.
+        // Recheck time on every playback callback so expiry cannot race the timer.
+        if (controller.packageName in ManagedMediaEnforcement.explicitMediaPackages(
+                latestPolicySettings, System.currentTimeMillis())) return true
         val appPackages = managedAppPackages ?: coordinatorAppPackages
         if (controller.packageName in appPackages) return true
         if (controller.packageName !in browserTargetPackages) return false

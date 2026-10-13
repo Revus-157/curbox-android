@@ -1,0 +1,3 @@
+Managed policies can explicitly pause media for selected apps without blocking their screens.
+Media targets expire with their policy and never start playback when released.
+API status and policy readback let clients verify support before reporting enforcement.

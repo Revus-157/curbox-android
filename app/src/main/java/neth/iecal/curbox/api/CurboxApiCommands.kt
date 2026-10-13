@@ -299,6 +299,7 @@ object CurboxApiCommands {
                     "uiHider" to (BuildConfig.SUPPORTS_UI_HIDER && settings.uiHiderConfig.isActive),
                     "mediaControlGranted" to ManagedMediaCapability.isGranted(app),
                     "managedMediaControl" to ManagedMediaCapability.status(app),
+                    "managedMediaPackagesSupported" to true,
                     "browserMediaUriPresent" to
                         ManagedMediaNotificationListener.readBrowserMediaUriPresent(app)
                 )

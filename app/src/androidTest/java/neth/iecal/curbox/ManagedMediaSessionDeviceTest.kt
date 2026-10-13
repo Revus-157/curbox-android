@@ -5,6 +5,11 @@ import android.media.MediaMetadata
 import android.media.session.PlaybackState
 import android.media.session.MediaSessionManager
 import android.content.ComponentName
+import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.Context
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import android.os.Handler
 import android.os.Looper
 import androidx.core.app.NotificationManagerCompat
@@ -233,10 +238,31 @@ class ManagedMediaSessionDeviceTest {
         // after that force-stop; keep the test bounded while allowing the real service to return.
         val deadline = System.currentTimeMillis() + 35_000L
         while (System.currentTimeMillis() < deadline) {
-            ManagedMediaNotificationListener.sendTarget(context, target)
-            if (controller.playbackState?.state == PlaybackState.STATE_PAUSED) return true
+            sendTargetAndAwaitReceiver(context, target)
+            if (controller.playbackState?.state == PlaybackState.STATE_PAUSED) {
+                // Complete the synthetic observation before testing later metadata transitions.
+                // Queued fresh targets are real reacquisition events, not retained attribution.
+                sendTargetAndAwaitReceiver(context, target.copy(retainBrowserSessions = true))
+                return true
+            }
             Thread.sleep(50L)
         }
         return controller.playbackState?.state == PlaybackState.STATE_PAUSED
+    }
+
+    private fun sendTargetAndAwaitReceiver(context: Context, target: ManagedMediaTarget) {
+        val delivered = CountDownLatch(1)
+        context.sendOrderedBroadcast(
+            Intent(ManagedMediaNotificationListener.ACTION_UPDATE_TARGETS).setPackage(context.packageName)
+                .putStringArrayListExtra("app_packages", ArrayList(target.appPackages))
+                .putStringArrayListExtra("browser_packages", ArrayList(target.browserPackages))
+                .putStringArrayListExtra("browser_domains", ArrayList(target.browserDomains))
+                .putExtra("retain_browser_sessions", target.retainBrowserSessions)
+                .putExtra("browser_attribution_expires_at_ms", target.browserAttributionExpiresAtMs ?: Long.MIN_VALUE),
+            null, object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) { delivered.countDown() }
+            }, Handler(Looper.getMainLooper()), 0, null, null
+        )
+        assertTrue("Synthetic target delivery did not finish", delivered.await(3, TimeUnit.SECONDS))
     }
 }

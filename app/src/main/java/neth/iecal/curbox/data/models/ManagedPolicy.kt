@@ -8,6 +8,7 @@ data class ManagedGroupPolicy(
     val members: List<String> = emptyList(),
     val expiresAtMs: Long = 0,
     val ownerPackage: String = "",
+    val mediaPackages: List<String> = emptyList(),
 )
 
 const val MANAGED_GROUP_PREFIX = "api-managed:"
@@ -21,6 +22,8 @@ fun replaceManagedPolicies(base: Settings, requested: List<ManagedGroupPolicy>, 
         require(it.name.isNotBlank() && it.name.length<=100)
         require(it.members.size in 1..100 && it.members.distinct().size==it.members.size)
         require(it.members.all { member -> member.isNotBlank() && member.length<=200 })
+        require(it.mediaPackages.size <= 100 && it.mediaPackages.distinct().size == it.mediaPackages.size)
+        require(it.mediaPackages.all { packageName -> packageName.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+")) && packageName.length <= 200 })
         require(it.expiresAtMs>nowMs && it.expiresAtMs<=nowMs+26*60*60*1000L)
     }
     return base.copy(managedGroupPolicies=base.managedGroupPolicies.filter { it.ownerPackage!=owner }+

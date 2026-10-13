@@ -12,7 +12,8 @@ data class ManagedMediaTarget(
     val browserPackages: Set<String> = emptySet(),
     val browserDomains: Set<String> = emptySet(),
     val retainBrowserSessions: Boolean = false,
-    val browserAttributionExpiresAtMs: Long? = null
+    val browserAttributionExpiresAtMs: Long? = null,
+    val mediaPackages: Set<String> = emptySet()
 )
 
 data class MediaSessionSnapshot(
@@ -28,6 +29,13 @@ data class MediaSessionSnapshot(
  * set, never notification content or the observed URL.
  */
 object ManagedMediaEnforcement {
+
+    /** Explicit caller opt-in affects media only, independently of website observations. */
+    fun explicitMediaPackages(settings: Settings?, nowMs: Long): Set<String> =
+        settings?.managedGroupPolicies.orEmpty().asSequence()
+            .filter { it.expiresAtMs > nowMs }
+            .flatMap { it.mediaPackages.asSequence() }
+            .toSet()
 
     /** Revalidates existing tokens only; neither a package nor a missing URI can acquire one. */
     fun <T> revalidateBrowserTokens(
@@ -130,6 +138,7 @@ object ManagedMediaEnforcement {
 
         return ManagedMediaTarget(
             appPackages = appPackages,
+            mediaPackages = explicitMediaPackages(settings, nowMs),
             browserPackages = if (browserBlocked && !observation!!.packageName.isNullOrBlank()) {
                 setOf(observation.packageName)
             } else {
@@ -146,7 +155,7 @@ object ManagedMediaEnforcement {
         sessions: List<MediaSessionSnapshot>
     ): Set<String> {
         if (!permissionAvailable) return emptySet()
-        val targeted = target.appPackages + target.browserPackages
+        val targeted = target.appPackages + target.browserPackages + target.mediaPackages
         return sessions.asSequence()
             .filter { it.isPlaying && it.packageName in targeted }
             .map(MediaSessionSnapshot::packageName)
