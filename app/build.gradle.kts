@@ -149,7 +149,7 @@ android {
             }
         }
         debug {
-//            applicationIdSuffix = ".debug"
+            applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
             resValue("string", "app_name", "Debug Curbox")
         }

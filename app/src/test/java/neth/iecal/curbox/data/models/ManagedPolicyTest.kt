@@ -168,4 +168,57 @@ class ManagedPolicyTest {
             ).isEmpty()
         )
     }
+
+    @Test fun blockedBrowserAttributionSurvivesLeaveButAllowedTransitionReleasesIt() {
+        val settings = Settings(
+            managedGroupPolicies = listOf(
+                ManagedGroupPolicy(
+                    "site", "keyword_group", "Site", listOf("blocked.example"), 2_000
+                )
+            )
+        )
+        val blocked = neth.iecal.curbox.trackers.WebsiteObservation(
+            "com.example.browser", "blocked.example", "blocked.example/watch"
+        )
+        val allowed = neth.iecal.curbox.trackers.WebsiteObservation(
+            "com.example.browser", "allowed.example", "allowed.example/watch"
+        )
+        val state = ManagedMediaEnforcement.AttributionState()
+
+        val foreground = state.targetFor(settings, 1_000, blocked)
+        assertEquals(setOf("com.example.browser"), foreground.browserPackages)
+        assertFalse(foreground.retainBrowserSessions)
+        assertEquals(2_000L, foreground.browserAttributionExpiresAtMs)
+
+        val background = state.targetFor(settings, 1_100, null)
+        assertEquals(setOf("com.example.browser"), background.browserPackages)
+        assertTrue(background.retainBrowserSessions)
+
+        val released = state.targetFor(settings, 1_200, allowed)
+        assertTrue(released.browserPackages.isEmpty())
+        assertFalse(released.retainBrowserSessions)
+        assertTrue(state.targetFor(settings, 1_300, null).browserPackages.isEmpty())
+    }
+
+    @Test fun blockedBrowserAttributionExpiresWithoutCoordinatorClear() {
+        val settings = Settings(
+            managedGroupPolicies = listOf(
+                ManagedGroupPolicy(
+                    "site", "keyword_group", "Site", listOf("blocked.example"), 2_000
+                )
+            )
+        )
+        val state = ManagedMediaEnforcement.AttributionState()
+        state.targetFor(
+            settings,
+            1_000,
+            neth.iecal.curbox.trackers.WebsiteObservation(
+                "com.example.browser", "blocked.example", "blocked.example/watch"
+            )
+        )
+
+        val expired = state.targetFor(settings, 2_000, null)
+        assertTrue(expired.browserPackages.isEmpty())
+        assertFalse(expired.retainBrowserSessions)
+    }
 }

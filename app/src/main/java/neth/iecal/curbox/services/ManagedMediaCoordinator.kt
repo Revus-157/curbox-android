@@ -22,6 +22,7 @@ class ManagedMediaCoordinator(private val context: Context) {
     private var receiverRegistered = false
     private var latestSettings: Settings? = null
     private var latestObservation: WebsiteObservation? = null
+    private val attributionState = ManagedMediaEnforcement.AttributionState()
 
     private val targetRequestReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -64,12 +65,13 @@ class ManagedMediaCoordinator(private val context: Context) {
         scope.coroutineContext.cancel()
         latestSettings = null
         latestObservation = null
+        attributionState.clear()
         ManagedMediaNotificationListener.sendTarget(context, ManagedMediaTarget())
     }
 
     private fun dispatch() {
         val settings = latestSettings ?: return
-        val target = ManagedMediaEnforcement.targetFor(
+        val target = attributionState.targetFor(
             settings,
             System.currentTimeMillis(),
             latestObservation

@@ -9,7 +9,10 @@ import neth.iecal.curbox.utils.KeywordMatcher
 /** The package-only target passed to the notification listener process. */
 data class ManagedMediaTarget(
     val appPackages: Set<String> = emptySet(),
-    val browserPackages: Set<String> = emptySet()
+    val browserPackages: Set<String> = emptySet(),
+    val browserDomains: Set<String> = emptySet(),
+    val retainBrowserSessions: Boolean = false,
+    val browserAttributionExpiresAtMs: Long? = null
 )
 
 data class MediaSessionSnapshot(
@@ -26,6 +29,42 @@ data class MediaSessionSnapshot(
  */
 object ManagedMediaEnforcement {
 
+    /**
+     * Keeps only the most recent blocked browser observation across a foreground clear.
+     * The listener uses [ManagedMediaTarget.retainBrowserSessions] to bind that attribution
+     * to the sessions already active at the clear; a new session in the same browser package
+     * is not selected until a fresh blocked observation arrives.
+     */
+    class AttributionState {
+        private var lastBlockedObservation: WebsiteObservation? = null
+
+        fun targetFor(
+            settings: Settings,
+            nowMs: Long,
+            observation: WebsiteObservation?
+        ): ManagedMediaTarget {
+            if (observation != null) {
+                val direct = ManagedMediaEnforcement.targetFor(settings, nowMs, observation)
+                lastBlockedObservation = observation.takeIf { direct.browserPackages.isNotEmpty() }
+                return direct
+            }
+
+            val retained = lastBlockedObservation?.let {
+                ManagedMediaEnforcement.targetFor(settings, nowMs, it)
+            }
+            if (retained?.browserPackages?.isNotEmpty() == true) {
+                return retained.copy(retainBrowserSessions = true)
+            }
+
+            lastBlockedObservation = null
+            return ManagedMediaEnforcement.targetFor(settings, nowMs, null)
+        }
+
+        fun clear() {
+            lastBlockedObservation = null
+        }
+    }
+
     fun targetFor(
         settings: Settings,
         nowMs: Long,
@@ -39,6 +78,18 @@ object ManagedMediaEnforcement {
             .filter(String::isNotBlank)
             .toSet()
 
+        val matchingKeywordPolicies = if (observation == null) {
+            emptyList()
+        } else {
+            settings.managedGroupPolicies.filter { policy ->
+                policy.kind == "keyword_group" &&
+                    policy.expiresAtMs > nowMs &&
+                    policy.members.any { member ->
+                        val patterns = KeywordMatcher.compileKeywords(listOf(member))
+                        KeywordMatcher.matchesPatterns(patterns, observation.urlIdentifier)
+                    }
+            }
+        }
         val browserBlocked = if (observation == null) {
             false
         } else {
@@ -57,7 +108,9 @@ object ManagedMediaEnforcement {
                 setOf(observation.packageName)
             } else {
                 emptySet()
-            }
+            },
+            browserDomains = if (browserBlocked) setOf(observation!!.domain) else emptySet(),
+            browserAttributionExpiresAtMs = matchingKeywordPolicies.maxOfOrNull { it.expiresAtMs }
         )
     }
 
