@@ -1,0 +1,2 @@
+Managed protection warnings explain that an active rule blocks the content.
+Personal warning messages remain unchanged.
