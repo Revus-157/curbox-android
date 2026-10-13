@@ -25,6 +25,7 @@ import java.time.temporal.ChronoUnit
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import neth.iecal.curbox.data.models.ManagedGroupPolicy
+import neth.iecal.curbox.services.ManagedMediaNotificationListener
 
 /**
  * Turns an API command into a real change in Curbox.
@@ -297,7 +298,9 @@ object CurboxApiCommands {
                     "reelCounter" to settings.isReelCounterOn,
                     "uiHider" to (BuildConfig.SUPPORTS_UI_HIDER && settings.uiHiderConfig.isActive),
                     "mediaControlGranted" to ManagedMediaCapability.isGranted(app),
-                    "managedMediaControl" to ManagedMediaCapability.status(app)
+                    "managedMediaControl" to ManagedMediaCapability.status(app),
+                    "browserMediaUriPresent" to
+                        ManagedMediaNotificationListener.readBrowserMediaUriPresent(app)
                 )
             }
         }

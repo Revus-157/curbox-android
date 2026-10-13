@@ -37,7 +37,11 @@ official active-session API and sends only a targeted pause command; it does not
 notification content, use global media keys, or claim audio focus. The `STATUS` object reports
 `mediaControlGranted` as a boolean readiness flag and `managedMediaControl` as `available` or `permission_required`. If permission is missing or revoked,
 managed blocking remains active and media control is a documented no-op. Curbox never resumes media
-when a target expires or becomes allowed.
+when a target expires or becomes allowed. `browserMediaUriPresent` is a nullable, payload-free
+diagnostic: it is `null` when notification access is missing, no active supported-browser session
+is available, or session enumeration fails; `false` when supported-browser sessions expose no
+valid media-URI host; and `true` when at least one does. It does not identify a site or session,
+and does not prove that a blocked session was paused.
 
 ---
 
@@ -206,7 +210,7 @@ Use the group lists to find the `id` you pass back as `target` in `execute`.
 | `GRAYSCALE_GROUPS` | `id`, `name`, `isActive`, `apps` |
 | `AUTO_DND_GROUPS` | `id`, `name`, `autoTurnOnDnd` |
 | `UI_HIDER_SCRIPTS` | `id`, `label`, `packageName`, `isEnabled` |
-| `STATUS` | object: `focusActive`, `focusGroup`, `focusRemainingMinutes`, `keywordBlocker`, `reelBlocker`, `reelCounter`, `uiHider`, `mediaControlGranted`, `managedMediaControl` |
+| `STATUS` | object: `focusActive`, `focusGroup`, `focusRemainingMinutes`, `keywordBlocker`, `reelBlocker`, `reelCounter`, `uiHider`, `mediaControlGranted`, `managedMediaControl`, `browserMediaUriPresent` |
 
 ```kotlin
 api?.list("FOCUS_GROUPS")

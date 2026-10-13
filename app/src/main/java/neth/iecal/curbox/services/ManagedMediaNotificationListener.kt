@@ -21,6 +21,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import neth.iecal.curbox.api.ManagedMediaCapability
 import neth.iecal.curbox.data.models.MANAGED_GROUP_PREFIX
 import neth.iecal.curbox.data.models.Settings
 import neth.iecal.curbox.data.models.effectiveManagedSettings
@@ -366,6 +367,19 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
             "browser_attribution_expires_at_ms"
         private const val NO_EXPIRY = Long.MIN_VALUE
         private const val TAG = "ManagedMediaListener"
+
+        /**
+         * Reads only whether an active supported-browser session exposes a valid URI host.
+         * Missing notification access, no matching session, or an enumeration failure is null.
+         */
+        fun readBrowserMediaUriPresent(context: Context): Boolean? {
+            if (!ManagedMediaCapability.isGranted(context)) return null
+            val manager = context.getSystemService(MediaSessionManager::class.java) ?: return null
+            val component = ComponentName(context, ManagedMediaNotificationListener::class.java)
+            return runCatching {
+                ManagedMediaBrowserStatus.fromControllers(manager.getActiveSessions(component))
+            }.getOrNull()
+        }
 
         fun sendTarget(context: Context, target: ManagedMediaTarget) {
             context.applicationContext.sendBroadcast(
