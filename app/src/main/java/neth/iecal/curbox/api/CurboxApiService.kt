@@ -29,10 +29,13 @@ class CurboxApiService : Service() {
 
         override fun execute(command: String?, args: Bundle?): String {
             if (!callerAllowed()) return CurboxApiContract.STATUS_DENIED
+            val caller = packageManager.getPackagesForUid(Binder.getCallingUid())
+                ?.firstOrNull { it in ApiAuthStore.grantedPackages(applicationContext) }
+                ?: return CurboxApiContract.STATUS_DENIED
             if (ApiCommand.fromNameOrNull(command) == null) return CurboxApiContract.STATUS_UNKNOWN_COMMAND
             return try {
                 val applied = runBlocking {
-                    CurboxApiCommands.runCommand(applicationContext, command, args ?: Bundle())
+                    CurboxApiCommands.runCommand(applicationContext, command, args ?: Bundle(), caller)
                 }
                 if (applied) CurboxApiContract.STATUS_OK else CurboxApiContract.STATUS_FAILED
             } catch (e: Exception) {

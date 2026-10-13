@@ -204,6 +204,7 @@ class KeywordBlocker : BaseBlocker() {
         val now = System.currentTimeMillis()
 
         val eligible = matched.filter { group ->
+            if (group.id.startsWith(neth.iecal.curbox.data.models.MANAGED_GROUP_PREFIX)) return@filter true
             val cooldownEnd = cooldownGroupsList[group.id]
             if (cooldownEnd != null) {
                 if (cooldownEnd > now) return@filter false

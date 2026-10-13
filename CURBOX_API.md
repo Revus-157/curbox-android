@@ -15,7 +15,21 @@ of this repo; read its `MainActivity.kt` alongside this doc.
 - **Identity:** the calling app's verified UID, resolved to its package. No tokens.
 - **Permission:** the user approves your app from a dialog Curbox shows. They can remove access any
   time under **Reducers → Curbox API → Connected apps**, or turn the whole API off with one switch.
-- **API version:** `3` (call `apiVersion()` to check).
+- **API version:** `4` (call `apiVersion()` to check). Existing clients need renewed approval for this capability version.
+
+### Bounded managed targets (API 4)
+
+`execute("REPLACE_MANAGED_POLICIES", Bundle)` takes a `policies` JSON array, for example:
+
+```json
+[{"id":"video","kind":"keyword_group","name":"Video","members":["example.test"],"expiresAtMs":1790000000000}]
+```
+
+Use a future epoch-millisecond deadline, at most 26 hours from application time. Up to 32 unique targets and 100 distinct nonempty members per target are accepted. Supported kinds are `app_group` (package names) and `keyword_group` (matching keywords). An empty array releases this caller's targets only. Caller identity comes from Binder; a supplied owner field cannot impersonate another client.
+
+These targets are an independent effective blocking layer, not edits to personal groups. Their all-day zero-usage configuration and active state cannot be weakened by editing/deleting personal groups, global keyword toggles or ordinary group cooldowns. Local expiry stops applying the layer; it does not change a user's original groups. `list("MANAGED_POLICIES")` returns retained records for receipt verification; clients must check owner, contents and deadline, and ignore expired records. Group lists include members and derived managed groups while active.
+
+This is bounded cooperative enforcement, not Android device-owner management. Revoked accessibility access, OS force-stop/data removal, device clock manipulation and administrative control are not made tamper-proof by this API. Ordinary client permission revocation does not mutate a currently retained target; the target still expires locally. No media or administrator permissions are granted by this command.
 
 ---
 

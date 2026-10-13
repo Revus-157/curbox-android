@@ -22,6 +22,9 @@ import kotlinx.coroutines.flow.first
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import neth.iecal.curbox.data.models.ManagedGroupPolicy
 
 /**
  * Turns an API command into a real change in Curbox.
@@ -35,7 +38,7 @@ object CurboxApiCommands {
     private const val TAG = "CurboxApi"
 
     /** Runs an action command. Returns true if it was understood and applied. */
-    suspend fun runCommand(context: Context, commandName: String?, args: Bundle): Boolean {
+    suspend fun runCommand(context: Context, commandName: String?, args: Bundle, callerPackage: String? = null): Boolean {
         val command = ApiCommand.fromNameOrNull(commandName) ?: return false
         val target = args.getString(CurboxApiContract.ARG_TARGET).orEmpty()
         val enable = args.getBoolean(CurboxApiContract.ARG_ENABLE, true)
@@ -46,6 +49,15 @@ object CurboxApiCommands {
 
         return try {
             when (command) {
+                ApiCommand.REPLACE_MANAGED_POLICIES -> {
+                    val owner=requireNotNull(callerPackage)
+                    val raw=requireNotNull(args.getString("policies"))
+                    require(raw.length<=100_000)
+                    val policies=Gson().fromJson<List<ManagedGroupPolicy>>(raw,object:TypeToken<List<ManagedGroupPolicy>>(){}.type)
+                    dataStore.replaceManagedPoliciesForCaller(owner,requireNotNull(policies))
+                    broadcast(app,AppBlocker.INTENT_ACTION_REFRESH_APP_BLOCKER)
+                    broadcast(app,KeywordBlocker.INTENT_ACTION_REFRESH_CONFIG)
+                }
                 ApiCommand.START_FOCUS -> startFocus(app, dataStore, target, minutes)
                 ApiCommand.STOP_FOCUS -> stopFocus(app, dataStore)
                 ApiCommand.SET_APP_BLOCKER_GROUP -> setAppBlockerGroup(app, dataStore, target, enable)
@@ -210,6 +222,7 @@ object CurboxApiCommands {
         val settings = DataStoreManager(app).settings.first()
 
         return when (kind) {
+            ApiList.MANAGED_POLICIES -> settings.managedGroupPolicies
             ApiList.FOCUS_GROUPS -> settings.manualFocusGroups.map { g ->
                 linkedMapOf(
                     "id" to g.groupId,
@@ -227,7 +240,8 @@ object CurboxApiCommands {
                     "id" to g.id,
                     "name" to g.name,
                     "isActive" to g.isActive,
-                    "apps" to g.selectedPackages.size
+                    "apps" to g.selectedPackages.size,
+                    "members" to g.selectedPackages
                 )
             }
 
@@ -236,7 +250,8 @@ object CurboxApiCommands {
                     "id" to g.id,
                     "name" to g.name,
                     "isActive" to g.isActive,
-                    "keywords" to g.selectedKeywords.size
+                    "keywords" to g.selectedKeywords.size,
+                    "members" to g.selectedKeywords
                 )
             }
 

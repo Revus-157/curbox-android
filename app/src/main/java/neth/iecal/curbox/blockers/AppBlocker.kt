@@ -346,6 +346,7 @@ class AppBlocker : BaseBlocker() {
     }
 
     private fun isGroupInCooldown(groupId: String, now: Long = System.currentTimeMillis()): Boolean {
+        if (groupId.startsWith(neth.iecal.curbox.data.models.MANAGED_GROUP_PREFIX)) return false
         val endTime = cooldownGroupsList[groupId] ?: return false
         if (endTime > now) return true
         removeCooldownFrom(groupId)
