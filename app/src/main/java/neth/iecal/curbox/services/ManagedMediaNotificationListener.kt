@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import neth.iecal.curbox.api.ManagedMediaCapability
 import neth.iecal.curbox.data.models.MANAGED_GROUP_PREFIX
+import neth.iecal.curbox.data.models.ManagedGroupPolicy
 import neth.iecal.curbox.data.models.Settings
 import neth.iecal.curbox.data.models.effectiveManagedSettings
 import neth.iecal.curbox.utils.DataStoreManager
@@ -46,20 +47,14 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
     private var browserAttributionSessionTokens: Set<MediaSession.Token> = emptySet()
     private var browserAttributionResolved = false
     private var browserAttributionExpiresAtMs: Long? = null
+    private val connectionEpoch = ManagedMediaConnectionEpoch()
     private var targetGeneration = 0L
     private var settingsInitialized = false
+    private var managedPolicyFingerprint: Set<ManagedGroupPolicy> = emptySet()
     private var latestPolicySettings: Settings? = null
     private var settingsJob: kotlinx.coroutines.Job? = null
+    private var policyExpiryCheck: Runnable? = null
     private val callbacks = mutableMapOf<MediaController, MediaController.Callback>()
-
-    private val policyExpiryCheck = object : Runnable {
-        override fun run() {
-            val settings = latestPolicySettings
-            if (settings != null) {
-                refreshManagedPolicy(settings, System.currentTimeMillis())
-            }
-        }
-    }
 
     private val sessionsChangedListener =
         MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
@@ -103,9 +98,10 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        val epoch = connectionEpoch.connected()
         componentName = ComponentName(this, javaClass)
         sessionManager = getSystemService(MediaSessionManager::class.java)
-        startPolicyMonitoring()
+        startPolicyMonitoring(epoch)
         try {
             ContextCompat.registerReceiver(
                 this,
@@ -145,6 +141,7 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
                     null
                 )
                 handler.post {
+                    if (!connectionEpoch.accepts(epoch)) return@post
                     if (targetGeneration != requestGeneration) return@post
                     coordinatorAppPackages = target.appPackages
                     reconcileActiveSessions()
@@ -157,6 +154,7 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
+        connectionEpoch.disconnected()
         clearSessions()
         stopPolicyMonitoring()
         coordinatorAppPackages = emptySet()
@@ -169,6 +167,7 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
     }
 
     override fun onDestroy() {
+        connectionEpoch.disconnected()
         clearSessions()
         stopPolicyMonitoring()
         unregisterTargetReceiver()
@@ -214,7 +213,7 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
                     override fun onMetadataChanged(metadata: MediaMetadata?) {
                         if (controller.packageName in browserTargetPackages &&
                             browserAttributionSessionTokens.contains(controller.sessionToken) &&
-                            mediaUriMatchesBlockedDomain(metadata) == false
+                            mediaUriMatchesBlockedDomain(metadata) != true
                         ) {
                             browserAttributionSessionTokens =
                                 browserAttributionSessionTokens - controller.sessionToken
@@ -261,26 +260,34 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
         val appPackages = managedAppPackages ?: coordinatorAppPackages
         if (controller.packageName in appPackages) return true
         if (controller.packageName !in browserTargetPackages) return false
-        return controller.sessionToken in browserAttributionSessionTokens &&
-            mediaUriMatchesBlockedDomain(controller.metadata) != false
+        return ManagedMediaEnforcement.isBrowserSessionTargeted(
+            packageName = controller.packageName,
+            browserPackages = browserTargetPackages,
+            tokenAttributed = controller.sessionToken in browserAttributionSessionTokens,
+            uriMatchesBlockedDomain = mediaUriMatchesBlockedDomain(controller.metadata)
+        )
     }
 
-    private fun startPolicyMonitoring() {
+    private fun startPolicyMonitoring(epoch: Long) {
         stopPolicyMonitoring()
         settingsInitialized = false
+        managedPolicyFingerprint = emptySet()
         settingsJob = scope.launch {
             DataStoreManager(applicationContext).settings.collectLatest { settings ->
-                latestPolicySettings = settings
                 handler.post {
+                    if (!connectionEpoch.accepts(epoch)) return@post
                     val now = System.currentTimeMillis()
-                    if (settingsInitialized) {
+                    val currentFingerprint = ManagedMediaEnforcement.managedPolicyFingerprint(settings)
+                    if (settingsInitialized && managedPolicyFingerprint != currentFingerprint) {
                         // A settings change may revoke or replace the policy that justified
-                        // browser attribution. Release retained sessions until the coordinator
-                        // supplies a fresh trusted observation/target.
+                        // browser attribution. Unrelated user settings and heartbeat emissions
+                        // keep the same managed justification and therefore retain the target.
                         clearBrowserAttribution()
                     }
+                    managedPolicyFingerprint = currentFingerprint
+                    latestPolicySettings = settings
                     settingsInitialized = true
-                    refreshManagedPolicy(settings, now)
+                    refreshManagedPolicy(settings, now, epoch)
                 }
             }
         }
@@ -289,12 +296,15 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
     private fun stopPolicyMonitoring() {
         settingsJob?.cancel()
         settingsJob = null
-        handler.removeCallbacks(policyExpiryCheck)
+        policyExpiryCheck?.let(handler::removeCallbacks)
+        policyExpiryCheck = null
         latestPolicySettings = null
         settingsInitialized = false
+        managedPolicyFingerprint = emptySet()
     }
 
-    private fun refreshManagedPolicy(settings: Settings, nowMs: Long) {
+    private fun refreshManagedPolicy(settings: Settings, nowMs: Long, epoch: Long) {
+        if (!connectionEpoch.accepts(epoch)) return
         managedAppPackages = effectiveManagedSettings(settings, nowMs)
             .blockedAppGroups
             .asSequence()
@@ -306,14 +316,22 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
         if (browserAttributionExpired(nowMs)) {
             clearBrowserAttribution()
         }
-        handler.removeCallbacks(policyExpiryCheck)
+        policyExpiryCheck?.let(handler::removeCallbacks)
+        policyExpiryCheck = null
         val nextExpiry = settings.managedGroupPolicies
             .asSequence()
             .map { it.expiresAtMs }
             .filter { it > nowMs }
             .minOrNull()
         if (nextExpiry != null) {
-            handler.postDelayed(policyExpiryCheck, (nextExpiry - nowMs).coerceAtLeast(1L))
+            val expiryCheck = Runnable {
+                if (!connectionEpoch.accepts(epoch)) return@Runnable
+                latestPolicySettings?.let { current ->
+                    refreshManagedPolicy(current, System.currentTimeMillis(), epoch)
+                }
+            }
+            policyExpiryCheck = expiryCheck
+            handler.postDelayed(expiryCheck, (nextExpiry - nowMs).coerceAtLeast(1L))
         }
         reconcileActiveSessions()
     }
@@ -340,7 +358,7 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
         }.toSet()
     }
 
-    /** Returns null when the platform does not expose a URI; null keeps the bounded fallback. */
+    /** Returns null when the platform does not expose a URI; null makes the session ineligible. */
     private fun mediaUriMatchesBlockedDomain(metadata: MediaMetadata?): Boolean? {
         val rawUri = metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI)
             ?.takeIf(String::isNotBlank)

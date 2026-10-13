@@ -75,6 +75,16 @@ class ManagedMediaSessionDeviceTest {
                 awaitState(allowedController, PlaybackState.STATE_PLAYING)
             )
 
+            // Losing the URI releases the token too; a same-package URI-less session must not
+            // be paused merely because the package and old token are still known.
+            session.setMetadata(metadataWithoutUri("uncertain-track"))
+            Thread.sleep(200L)
+            session.setPlaybackState(playingState())
+            assertTrue(
+                "URI-less same-package track was changed",
+                awaitState(controller, PlaybackState.STATE_PLAYING)
+            )
+
             // A same-package track/tab transition to an allowed URI releases the token. A fresh
             // blocked URI may reacquire it only after the trusted target is dispatched again.
             session.setMetadata(metadata("allowed-track", "https://allowed.example/track"))
@@ -127,6 +137,10 @@ class ManagedMediaSessionDeviceTest {
     private fun metadata(title: String, mediaUri: String): MediaMetadata = MediaMetadata.Builder()
         .putString(MediaMetadata.METADATA_KEY_TITLE, title)
         .putString(MediaMetadata.METADATA_KEY_MEDIA_URI, mediaUri)
+        .build()
+
+    private fun metadataWithoutUri(title: String): MediaMetadata = MediaMetadata.Builder()
+        .putString(MediaMetadata.METADATA_KEY_TITLE, title)
         .build()
 
     private fun awaitUnrelatedController(context: android.content.Context): android.media.session.MediaController {

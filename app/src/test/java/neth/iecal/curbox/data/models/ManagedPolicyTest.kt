@@ -221,4 +221,67 @@ class ManagedPolicyTest {
         assertTrue(expired.browserPackages.isEmpty())
         assertFalse(expired.retainBrowserSessions)
     }
+
+    @Test
+    fun browserAttributionRequiresAConfirmedBlockedUri() {
+        assertTrue(
+            ManagedMediaEnforcement.isBrowserSessionTargeted(
+                packageName = "com.example.browser",
+                browserPackages = setOf("com.example.browser"),
+                tokenAttributed = true,
+                uriMatchesBlockedDomain = true
+            )
+        )
+        assertFalse(
+            ManagedMediaEnforcement.isBrowserSessionTargeted(
+                packageName = "com.example.browser",
+                browserPackages = setOf("com.example.browser"),
+                tokenAttributed = true,
+                uriMatchesBlockedDomain = null
+            )
+        )
+        assertFalse(
+            ManagedMediaEnforcement.isBrowserSessionTargeted(
+                packageName = "com.example.browser",
+                browserPackages = setOf("com.example.browser"),
+                tokenAttributed = true,
+                uriMatchesBlockedDomain = false
+            )
+        )
+    }
+
+    @Test
+    fun unrelatedSettingsChangesKeepTheManagedPolicyJustification() {
+        val policy = ManagedGroupPolicy(
+            "site", "keyword_group", "Site", listOf("blocked.example"), 2_000
+        )
+        val base = Settings(managedGroupPolicies = listOf(policy))
+        val unrelated = base.copy(isReelCounterOn = !base.isReelCounterOn)
+
+        assertEquals(
+            ManagedMediaEnforcement.managedPolicyFingerprint(base),
+            ManagedMediaEnforcement.managedPolicyFingerprint(unrelated)
+        )
+    }
+
+    @Test
+    fun managedPolicyReleaseOrReplacementChangesTheJustification() {
+        val policy = ManagedGroupPolicy(
+            "site", "keyword_group", "Site", listOf("blocked.example"), 2_000
+        )
+        val base = Settings(managedGroupPolicies = listOf(policy))
+        val released = Settings()
+        val replaced = Settings(
+            managedGroupPolicies = listOf(policy.copy(members = listOf("other.example")))
+        )
+
+        assertNotEquals(
+            ManagedMediaEnforcement.managedPolicyFingerprint(base),
+            ManagedMediaEnforcement.managedPolicyFingerprint(released)
+        )
+        assertNotEquals(
+            ManagedMediaEnforcement.managedPolicyFingerprint(base),
+            ManagedMediaEnforcement.managedPolicyFingerprint(replaced)
+        )
+    }
 }

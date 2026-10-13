@@ -1,6 +1,7 @@
 package neth.iecal.curbox.services
 
 import neth.iecal.curbox.data.models.MANAGED_GROUP_PREFIX
+import neth.iecal.curbox.data.models.ManagedGroupPolicy
 import neth.iecal.curbox.data.models.Settings
 import neth.iecal.curbox.data.models.effectiveManagedSettings
 import neth.iecal.curbox.trackers.WebsiteObservation
@@ -28,6 +29,18 @@ data class MediaSessionSnapshot(
  * set, never notification content or the observed URL.
  */
 object ManagedMediaEnforcement {
+
+    /** Only API-owned managed policy records justify retained browser attribution. */
+    fun managedPolicyFingerprint(settings: Settings): Set<ManagedGroupPolicy> =
+        settings.managedGroupPolicies.toSet()
+
+    /** A browser session is targeted only while its current URI still proves the blocked site. */
+    fun isBrowserSessionTargeted(
+        packageName: String,
+        browserPackages: Set<String>,
+        tokenAttributed: Boolean,
+        uriMatchesBlockedDomain: Boolean?
+    ): Boolean = packageName in browserPackages && tokenAttributed && uriMatchesBlockedDomain == true
 
     /**
      * Keeps only the most recent blocked browser observation across a foreground clear.
