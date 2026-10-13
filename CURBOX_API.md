@@ -31,6 +31,18 @@ These targets are an independent effective blocking layer, not edits to personal
 
 This is bounded cooperative enforcement, not Android device-owner management. Revoked accessibility access, OS force-stop/data removal, device clock manipulation and administrative control are not made tamper-proof by this API. Ordinary client permission revocation does not mutate a currently retained target; the target still expires locally. No media or administrator permissions are granted by this command.
 
+API 5 implementations advertising `STATUS.managedMediaPackagesSupported=true` also accept
+an optional `mediaPackages` list on each managed policy. It defaults to an empty list, contains
+up to 100 unique Android package names, and shares the policy's owner and bounded expiry.
+This is an explicit media-only opt-in: all playing/buffering sessions belonging to those packages
+are paused while the policy is active, including background sessions without a media URI or a
+current website observation. It does not add those packages to app blocking groups. The listener
+loads this policy independently on startup/reconnect and rechecks expiry on playback callbacks.
+Release and expiry remove pause eligibility and never start playback. Clients must check the
+capability flag, existing media permission readiness, and the exact `mediaPackages` readback in
+`MANAGED_POLICIES`; API version 5 alone does not prove support for this additive field.
+Without this explicit opt-in, keyword media policies still require current URI attribution.
+
 Managed app and trusted blocked-website targets also pause only the matching active media session when
 the owner has enabled Curbox's **notification access** in Android system settings. Curbox uses the
 official active-session API and sends only a targeted pause command; it does not read or store
@@ -210,7 +222,7 @@ Use the group lists to find the `id` you pass back as `target` in `execute`.
 | `GRAYSCALE_GROUPS` | `id`, `name`, `isActive`, `apps` |
 | `AUTO_DND_GROUPS` | `id`, `name`, `autoTurnOnDnd` |
 | `UI_HIDER_SCRIPTS` | `id`, `label`, `packageName`, `isEnabled` |
-| `STATUS` | object: `focusActive`, `focusGroup`, `focusRemainingMinutes`, `keywordBlocker`, `reelBlocker`, `reelCounter`, `uiHider`, `mediaControlGranted`, `managedMediaControl`, `browserMediaUriPresent` |
+| `STATUS` | object: `focusActive`, `focusGroup`, `focusRemainingMinutes`, `keywordBlocker`, `reelBlocker`, `reelCounter`, `uiHider`, `mediaControlGranted`, `managedMediaControl`, `managedMediaPackagesSupported`, `browserMediaUriPresent` |
 
 ```kotlin
 api?.list("FOCUS_GROUPS")

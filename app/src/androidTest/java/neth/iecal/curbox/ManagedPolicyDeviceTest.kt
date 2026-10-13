@@ -56,6 +56,8 @@ class ManagedPolicyDeviceTest {
             val deadline=System.currentTimeMillis()+5000
             val target=JSONObject().put("id","synthetic-youtube").put("kind","keyword_group").put("name","Synthetic video")
                 .put("members",JSONArray(listOf("youtube"))).put("expiresAtMs",deadline)
+                .put("mediaPackages",JSONArray(listOf("com.example.browser")))
+            assertTrue(JSONObject(client.list("STATUS")).getBoolean("managedMediaPackagesSupported"))
             assertEquals("OK",client.execute("REPLACE_MANAGED_POLICIES",Bundle().apply { putString("policies",JSONArray().put(target).toString()) }))
             runBlocking { DataStoreManager(context).updateKeywordBlockerConfig { it.copy(isActive=false,keywordGroups=emptyList()) } }
             val groups=JSONArray(client.list("KEYWORD_GROUPS"))
@@ -64,6 +66,8 @@ class ManagedPolicyDeviceTest {
             assertEquals(listOf("youtube"),groups.getJSONObject(0).getJSONArray("members").let { a -> (0 until a.length()).map { a.getString(it) } })
             val receipt=JSONArray(client.list("MANAGED_POLICIES"))
             assertEquals(context.packageName,receipt.getJSONObject(0).getString("ownerPackage"))
+            assertEquals("com.example.browser",receipt.getJSONObject(0).getJSONArray("mediaPackages").getString(0))
+            assertEquals(0,JSONArray(client.list("APP_BLOCKER_GROUPS")).length())
             Thread.sleep((deadline-System.currentTimeMillis()+100).coerceAtLeast(0))
             assertEquals(0,JSONArray(client.list("KEYWORD_GROUPS")).length())
             assertEquals("OK",client.execute("REPLACE_MANAGED_POLICIES",Bundle().apply { putString("policies","[]") }))
