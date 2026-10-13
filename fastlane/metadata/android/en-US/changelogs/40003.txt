@@ -1,0 +1,1 @@
+Authorized external clients can apply bounded, independently expiring managed blocking targets. Editing personal groups no longer weakens these targets. API capability version 4 requires renewed client approval; local data remains intact.

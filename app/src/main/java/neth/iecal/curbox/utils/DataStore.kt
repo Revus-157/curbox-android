@@ -12,6 +12,12 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.transformLatest
+import kotlinx.coroutines.delay
+import neth.iecal.curbox.data.models.ManagedGroupPolicy
+import neth.iecal.curbox.data.models.MANAGED_GROUP_PREFIX
+import neth.iecal.curbox.data.models.effectiveManagedSettings
+import neth.iecal.curbox.data.models.replaceManagedPolicies
 import neth.iecal.curbox.R
 import neth.iecal.curbox.data.models.AppGroup
 import neth.iecal.curbox.data.models.GatedSettingsField
@@ -144,7 +150,21 @@ class DataStoreManager(private val context: Context) {
 
     private val settingsDataStore = getSettingsDataStore(context, gson)
 
-    val settings = settingsDataStore.data
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val settings = settingsDataStore.data.transformLatest { raw ->
+        var now=System.currentTimeMillis()
+        emit(effectiveManagedSettings(raw,now))
+        while (true) {
+            val next=raw.managedGroupPolicies.filter { it.expiresAtMs>now }.minOfOrNull { it.expiresAtMs } ?: break
+            delay((next-now).coerceAtLeast(1))
+            now=System.currentTimeMillis()
+            emit(effectiveManagedSettings(raw,now))
+        }
+    }
+
+    suspend fun replaceManagedPoliciesForCaller(owner: String, targets: List<ManagedGroupPolicy>) {
+        settingsDataStore.updateData { current -> replaceManagedPolicies(current,targets,owner,System.currentTimeMillis()) }
+    }
 
     /**
      * The values the user has requested, including changes still waiting for their deadline.
@@ -153,7 +173,7 @@ class DataStoreManager(private val context: Context) {
     val settingsForEditing = settings.map(::overlayPendingChanges)
 
     suspend fun updateAppGroups(newGroups: List<AppGroup>) {
-        updateGated(GatedSettingsField.APP_GROUPS) { newGroups }
+        updateGated(GatedSettingsField.APP_GROUPS) { newGroups.filterNot { it.id.startsWith(MANAGED_GROUP_PREFIX) } }
     }
 
     suspend fun updateManualFocusGroups(newGroup: List<ManualFocusGroup>){
@@ -173,6 +193,7 @@ class DataStoreManager(private val context: Context) {
                 current.antiUninstallConfig2.isEnabled
 
             val remoteWithLocalRuntime = remote.copy(
+                managedGroupPolicies = current.managedGroupPolicies,
                 blockedAppGroups = remote.blockedAppGroups.map { group ->
                     group.copy(
                         temporarilyDisabledUntilMs = current.blockedAppGroups
@@ -328,7 +349,10 @@ class DataStoreManager(private val context: Context) {
     }
 
     suspend fun updateKeywordBlockerConfig(transform: (neth.iecal.curbox.data.models.KeywordBlocker) -> neth.iecal.curbox.data.models.KeywordBlocker) {
-        updateGated(GatedSettingsField.KEYWORD_BLOCKER) { transform(it.keywordBlockerConfig) }
+        updateGated(GatedSettingsField.KEYWORD_BLOCKER) { current ->
+            val proposed=transform(current.keywordBlockerConfig)
+            proposed.copy(keywordGroups=proposed.keywordGroups.filterNot { it.id.startsWith(MANAGED_GROUP_PREFIX) })
+        }
     }
 
     suspend fun updateReelCounterState(isActive: Boolean) {
