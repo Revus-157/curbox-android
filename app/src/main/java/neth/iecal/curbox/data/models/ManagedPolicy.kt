@@ -33,11 +33,13 @@ fun effectiveManagedSettings(base: Settings, nowMs: Long): Settings {
     val hard=ScheduledUsageConfig(schedule=AppTimeConfig.allDay(),usage=AppUsageConfig(uniformLimit=0))
     val apps=active.filter { it.kind=="app_group" }.map {
         AppGroup(id=MANAGED_GROUP_PREFIX+it.ownerPackage+":"+it.id,name=it.name+" (managed)",selectedPackages=it.members,
-            config=hard,isActive=true)
+            config=hard,isActive=true,
+            warningScreenConfig=AppBlockerWarningScreenConfig(isProceedDisabled=true))
     }
     val keywords=active.filter { it.kind=="keyword_group" }.map {
         KeywordGroup(id=MANAGED_GROUP_PREFIX+it.ownerPackage+":"+it.id,name=it.name+" (managed)",selectedKeywords=it.members,
-            config=hard,isActive=true)
+            config=hard,isActive=true,
+            warningScreenConfig=AppBlockerWarningScreenConfig(isProceedDisabled=true))
     }
     return base.copy(
         blockedAppGroups=base.blockedAppGroups.filterNot { it.id.startsWith(MANAGED_GROUP_PREFIX) }+apps,

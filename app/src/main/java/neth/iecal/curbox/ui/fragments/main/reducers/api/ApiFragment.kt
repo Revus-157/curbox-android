@@ -1,6 +1,8 @@
 package neth.iecal.curbox.ui.fragments.main.reducers.api
 
+import android.content.Intent
 import android.os.Bundle
+import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -12,6 +14,7 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.materialswitch.MaterialSwitch
 import neth.iecal.curbox.R
 import neth.iecal.curbox.api.ApiAuthStore
+import neth.iecal.curbox.api.ManagedMediaCapability
 import neth.iecal.curbox.utils.ViewUtils
 
 /**
@@ -35,11 +38,27 @@ class ApiFragment : Fragment() {
         val enableSwitch = view.findViewById<MaterialSwitch>(R.id.switch_enable_api)
         val appsContainer = view.findViewById<LinearLayout>(R.id.container_apps)
         val noAppsText = view.findViewById<TextView>(R.id.text_no_apps)
+        val mediaStatus = view.findViewById<TextView>(R.id.text_media_access_status)
 
         enableSwitch.isChecked = ApiAuthStore.isApiEnabled(context)
         enableSwitch.setOnCheckedChangeListener { _, isChecked ->
             ApiAuthStore.setApiEnabled(context, isChecked)
         }
+
+        fun refreshMediaAccess() {
+            mediaStatus.text = if (ManagedMediaCapability.isGranted(context)) {
+                getString(R.string.media_access_ready)
+            } else {
+                getString(R.string.media_access_needed)
+            }
+        }
+
+        view.findViewById<MaterialButton>(R.id.btn_media_access).setOnClickListener {
+            runCatching {
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
+        }
+        refreshMediaAccess()
 
         fun refreshApps() {
             appsContainer.removeAllViews()
@@ -86,5 +105,15 @@ class ApiFragment : Fragment() {
         }
 
         return view
+    }
+
+    override fun onResume() {
+        super.onResume()
+        view?.findViewById<TextView>(R.id.text_media_access_status)?.text =
+            if (ManagedMediaCapability.isGranted(requireContext())) {
+                getString(R.string.media_access_ready)
+            } else {
+                getString(R.string.media_access_needed)
+            }
     }
 }

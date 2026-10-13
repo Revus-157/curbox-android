@@ -58,6 +58,7 @@ class AppBlockerService : BaseBlockingService() {
     private val mindfulMessage = MindfulMessage()
     private val websiteUsageTracker = WebsiteUsageTracker()
     private val appUsageTracker = AppUsageTracker()
+    private val managedMediaCoordinator = ManagedMediaCoordinator(this)
 
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -182,9 +183,11 @@ class AppBlockerService : BaseBlockingService() {
         reelsCountTracker.setup(this, reelsOverlayManager, reelUsageTracker::onReelCounted)
         mindfulMessage.setup(this)
         websiteUsageTracker.setup(this) { observation ->
+            managedMediaCoordinator.onWebsiteObserved(observation)
             websiteObservationChannel.trySend(observation)
         }
         appUsageTracker.setup(this)
+        managedMediaCoordinator.start()
         neth.iecal.curbox.utils.UsageStatsCleaner.watch(this)
 
         focusModeBlocker.setupReceivers()
@@ -241,6 +244,7 @@ class AppBlockerService : BaseBlockingService() {
             reelUsageTracker.onDestroy()
             websiteUsageTracker.onDestroy()
             appUsageTracker.onDestroy()
+            managedMediaCoordinator.stop()
 
             eventChannel.close()
             websiteObservationChannel.close()

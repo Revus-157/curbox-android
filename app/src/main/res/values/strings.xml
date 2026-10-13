@@ -1279,6 +1279,11 @@
     <string name="api_how_title">How it works</string>
     <string name="api_how_body">When another app requests access, Curbox shows its name and asks for your approval. An approved app can run commands until you remove it. Removing an app ends its access immediately.</string>
     <string name="api_help_popup">Other apps can ask to control Curbox. You allow or deny each one, and you can remove access any time.</string>
+    <string name="media_access_title">Managed media control</string>
+    <string name="media_access_subtitle">Pause media from managed apps or blocked websites while their rule is active. Curbox does not read notification content.</string>
+    <string name="media_access_ready">Notification access is ready.</string>
+    <string name="media_access_needed">Notification access is needed for managed media control.</string>
+    <string name="media_access_open">Open notification access</string>
 
     <!-- Service protection (keep alive) -->
     <string name="service_protection_title">Keep Curbox running</string>

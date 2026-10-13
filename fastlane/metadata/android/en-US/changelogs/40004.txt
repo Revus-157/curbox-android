@@ -1,0 +1,1 @@
+Managed media controls now keep browser attribution tied to the current media session and release it when URI evidence is lost. Reconnect, policy expiry, and unrelated settings updates are handled safely while existing data remains intact.

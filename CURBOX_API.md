@@ -15,7 +15,7 @@ of this repo; read its `MainActivity.kt` alongside this doc.
 - **Identity:** the calling app's verified UID, resolved to its package. No tokens.
 - **Permission:** the user approves your app from a dialog Curbox shows. They can remove access any
   time under **Reducers → Curbox API → Connected apps**, or turn the whole API off with one switch.
-- **API version:** `4` (call `apiVersion()` to check). Existing clients need renewed approval for this capability version.
+- **API version:** `5` (call `apiVersion()` to check). Existing clients need renewed approval for this capability version.
 
 ### Bounded managed targets (API 4)
 
@@ -30,6 +30,18 @@ Use a future epoch-millisecond deadline, at most 26 hours from application time.
 These targets are an independent effective blocking layer, not edits to personal groups. Their all-day zero-usage configuration and active state cannot be weakened by editing/deleting personal groups, global keyword toggles or ordinary group cooldowns. Local expiry stops applying the layer; it does not change a user's original groups. `list("MANAGED_POLICIES")` returns retained records for receipt verification; clients must check owner, contents and deadline, and ignore expired records. Group lists include members and derived managed groups while active.
 
 This is bounded cooperative enforcement, not Android device-owner management. Revoked accessibility access, OS force-stop/data removal, device clock manipulation and administrative control are not made tamper-proof by this API. Ordinary client permission revocation does not mutate a currently retained target; the target still expires locally. No media or administrator permissions are granted by this command.
+
+Managed app and trusted blocked-website targets also pause only the matching active media session when
+the owner has enabled Curbox's **notification access** in Android system settings. Curbox uses the
+official active-session API and sends only a targeted pause command; it does not read or store
+notification content, use global media keys, or claim audio focus. The `STATUS` object reports
+`mediaControlGranted` as a boolean readiness flag and `managedMediaControl` as `available` or `permission_required`. If permission is missing or revoked,
+managed blocking remains active and media control is a documented no-op. Curbox never resumes media
+when a target expires or becomes allowed. `browserMediaUriPresent` is a nullable, payload-free
+diagnostic: it is `null` when notification access is missing, no active supported-browser session
+is available, or session enumeration fails; `false` when supported-browser sessions expose no
+valid media-URI host; and `true` when at least one does. It does not identify a site or session,
+and does not prove that a blocked session was paused.
 
 ---
 
@@ -198,7 +210,7 @@ Use the group lists to find the `id` you pass back as `target` in `execute`.
 | `GRAYSCALE_GROUPS` | `id`, `name`, `isActive`, `apps` |
 | `AUTO_DND_GROUPS` | `id`, `name`, `autoTurnOnDnd` |
 | `UI_HIDER_SCRIPTS` | `id`, `label`, `packageName`, `isEnabled` |
-| `STATUS` | object: `focusActive`, `focusGroup`, `focusRemainingMinutes`, `keywordBlocker`, `reelBlocker`, `reelCounter`, `uiHider` |
+| `STATUS` | object: `focusActive`, `focusGroup`, `focusRemainingMinutes`, `keywordBlocker`, `reelBlocker`, `reelCounter`, `uiHider`, `mediaControlGranted`, `managedMediaControl`, `browserMediaUriPresent` |
 
 ```kotlin
 api?.list("FOCUS_GROUPS")
