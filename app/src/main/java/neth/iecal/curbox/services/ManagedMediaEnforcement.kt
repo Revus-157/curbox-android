@@ -36,14 +36,16 @@ object ManagedMediaEnforcement {
         attributedTokens: Set<T>,
         mediaUris: Map<T, String?>
     ): Set<T> = attributedTokens.filterTo(mutableSetOf()) { token ->
-        val uri = mediaUris[token]
-        !uri.isNullOrBlank() &&
+        browserPolicyMatchesUri(settings, nowMs, mediaUris[token])
+    }
+
+    fun browserPolicyMatchesUri(settings: Settings?, nowMs: Long, uri: String?): Boolean =
+        settings != null && !uri.isNullOrBlank() &&
             runCatching { java.net.URI(uri).host?.isNotBlank() == true }.getOrDefault(false) &&
             settings.managedGroupPolicies.any { policy ->
                 policy.kind == "keyword_group" && policy.expiresAtMs > nowMs &&
                     KeywordMatcher.matchesPatterns(KeywordMatcher.compileKeywords(policy.members), uri)
             }
-    }
 
     /** A browser session is targeted only while its current URI still proves the blocked site. */
     fun isBrowserSessionTargeted(

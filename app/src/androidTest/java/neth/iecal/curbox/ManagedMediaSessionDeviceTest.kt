@@ -54,7 +54,7 @@ class ManagedMediaSessionDeviceTest {
         val store = DataStoreManager(context)
         val policyOwner = "managed-media-device-test"
         val keywordPolicy = ManagedGroupPolicy(
-            "site", "keyword_group", "Synthetic site", listOf("debug.example"),
+            "site", "keyword_group", "Synthetic site", listOf("debug.example/watch"),
             System.currentTimeMillis() + 120_000L
         )
         val unrelatedAppPolicy = ManagedGroupPolicy(
@@ -88,6 +88,18 @@ class ManagedMediaSessionDeviceTest {
                 "Allowed same-package session was changed",
                 awaitState(allowedController, PlaybackState.STATE_PLAYING)
             )
+
+            session.setMetadata(metadata("allowed-same-host", "https://debug.example/allowed"))
+            Thread.sleep(200L)
+            session.setPlaybackState(playingState())
+            Thread.sleep(300L)
+            assertEquals("Allowed path on the blocked host was paused", PlaybackState.STATE_PLAYING, controller.playbackState?.state)
+            session.setMetadata(metadata("target-restored", "https://debug.example/watch"))
+            Thread.sleep(200L)
+            session.setPlaybackState(playingState())
+            Thread.sleep(300L)
+            assertEquals("Released token was reacquired after a URI transition", PlaybackState.STATE_PLAYING, controller.playbackState?.state)
+            assertTrue("Fresh blocked observation did not reacquire media", awaitTargetPaused(context, controller, target))
 
             // A proven background token survives unrelated app-policy addition and removal.
             ManagedMediaNotificationListener.sendTarget(context, target.copy(retainBrowserSessions = true))
@@ -139,7 +151,7 @@ class ManagedMediaSessionDeviceTest {
                 "Allowed same-package track was changed",
                 awaitState(controller, PlaybackState.STATE_PLAYING)
             )
-            session.setMetadata(metadata("target-again", "https://debug.example/new"))
+            session.setMetadata(metadata("target-again", "https://debug.example/watch/new"))
             Thread.sleep(200L)
             session.setPlaybackState(playingState())
             assertTrue("Fresh blocked track was not paused", awaitTargetPaused(context, controller, target))

@@ -190,7 +190,7 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
         val activeTokens = controllers.map { it.sessionToken }.toSet()
         browserAttributionSessionTokens = browserAttributionSessionTokens.intersect(activeTokens)
         if (!retainBrowserSessions && browserTargetPackages.isNotEmpty() &&
-            !browserAttributionResolved
+            !browserAttributionResolved && latestPolicySettings != null
         ) {
             browserAttributionSessionTokens = resolveBrowserAttribution(controllers)
             browserAttributionResolved = true
@@ -210,7 +210,7 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
                     override fun onMetadataChanged(metadata: MediaMetadata?) {
                         if (controller.packageName in browserTargetPackages &&
                             browserAttributionSessionTokens.contains(controller.sessionToken) &&
-                            mediaUriMatchesBlockedDomain(metadata) != true
+                            mediaUriMatchesActiveBlockedPolicy(metadata) != true
                         ) {
                             browserAttributionSessionTokens =
                                 browserAttributionSessionTokens - controller.sessionToken
@@ -261,7 +261,7 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
             packageName = controller.packageName,
             browserPackages = browserTargetPackages,
             tokenAttributed = controller.sessionToken in browserAttributionSessionTokens,
-            uriMatchesBlockedDomain = mediaUriMatchesBlockedDomain(controller.metadata)
+            uriMatchesBlockedDomain = mediaUriMatchesActiveBlockedPolicy(controller.metadata)
         )
     }
 
@@ -346,7 +346,7 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
     private fun resolveBrowserAttribution(controllers: List<MediaController>): Set<MediaSession.Token> {
         return browserTargetPackages.flatMap { packageName ->
             val candidates = controllers.filter { it.packageName == packageName }
-            val uriMatches = candidates.filter { mediaUriMatchesBlockedDomain(it.metadata) == true }
+            val uriMatches = candidates.filter { mediaUriMatchesActiveBlockedPolicy(it.metadata) == true }
             // Package identity alone does not prove which browser tab owns a session. If the
             // platform omits a media URI, or several sessions remain ambiguous, fail closed.
             uriMatches.map { it.sessionToken }
@@ -354,7 +354,7 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
     }
 
     /** Returns null when the platform does not expose a URI; null makes the session ineligible. */
-    private fun mediaUriMatchesBlockedDomain(metadata: MediaMetadata?): Boolean? {
+    private fun mediaUriMatchesActiveBlockedPolicy(metadata: MediaMetadata?): Boolean? {
         val rawUri = metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI)
             ?.takeIf(String::isNotBlank)
             ?: return null
@@ -363,7 +363,9 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
             ?.lowercase()
             ?.removePrefix("www.")
             ?: return false
-        return browserBlockedDomains.any { domain ->
+        return ManagedMediaEnforcement.browserPolicyMatchesUri(
+            latestPolicySettings, System.currentTimeMillis(), rawUri
+        ) && browserBlockedDomains.any { domain ->
             val normalized = domain.lowercase().removePrefix("www.")
             host == normalized || host.endsWith(".$normalized")
         }

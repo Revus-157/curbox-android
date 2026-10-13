@@ -313,4 +313,24 @@ class ManagedPolicyTest {
             mapOf("fresh" to "https://blocked.example/watch")
         ).isEmpty())
     }
+
+    @Test
+    fun browserPauseRequiresCurrentFullUriProofAndAnAvailableActivePolicy() {
+        val settings = Settings(managedGroupPolicies = listOf(ManagedGroupPolicy(
+            "site", "keyword_group", "Site", listOf("blocked.example/watch"), 2_000
+        )))
+        assertTrue(ManagedMediaEnforcement.browserPolicyMatchesUri(
+            settings, 1_000, "https://blocked.example/watch"
+        ))
+        assertFalse(ManagedMediaEnforcement.browserPolicyMatchesUri(
+            settings, 1_000, "https://blocked.example/allowed"
+        ))
+        assertFalse(ManagedMediaEnforcement.browserPolicyMatchesUri(
+            null, 1_000, "https://blocked.example/watch"
+        ))
+        assertFalse(ManagedMediaEnforcement.browserPolicyMatchesUri(settings, 1_000, null))
+        assertFalse(ManagedMediaEnforcement.browserPolicyMatchesUri(
+            settings, 2_000, "https://blocked.example/watch"
+        ))
+    }
 }
