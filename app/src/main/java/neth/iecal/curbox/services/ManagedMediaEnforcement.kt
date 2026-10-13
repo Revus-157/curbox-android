@@ -1,7 +1,6 @@
 package neth.iecal.curbox.services
 
 import neth.iecal.curbox.data.models.MANAGED_GROUP_PREFIX
-import neth.iecal.curbox.data.models.ManagedGroupPolicy
 import neth.iecal.curbox.data.models.Settings
 import neth.iecal.curbox.data.models.effectiveManagedSettings
 import neth.iecal.curbox.trackers.WebsiteObservation
@@ -30,9 +29,21 @@ data class MediaSessionSnapshot(
  */
 object ManagedMediaEnforcement {
 
-    /** Only API-owned managed policy records justify retained browser attribution. */
-    fun managedPolicyFingerprint(settings: Settings): Set<ManagedGroupPolicy> =
-        settings.managedGroupPolicies.toSet()
+    /** Revalidates existing tokens only; neither a package nor a missing URI can acquire one. */
+    fun <T> revalidateBrowserTokens(
+        settings: Settings,
+        nowMs: Long,
+        attributedTokens: Set<T>,
+        mediaUris: Map<T, String?>
+    ): Set<T> = attributedTokens.filterTo(mutableSetOf()) { token ->
+        val uri = mediaUris[token]
+        !uri.isNullOrBlank() &&
+            runCatching { java.net.URI(uri).host?.isNotBlank() == true }.getOrDefault(false) &&
+            settings.managedGroupPolicies.any { policy ->
+                policy.kind == "keyword_group" && policy.expiresAtMs > nowMs &&
+                    KeywordMatcher.matchesPatterns(KeywordMatcher.compileKeywords(policy.members), uri)
+            }
+    }
 
     /** A browser session is targeted only while its current URI still proves the blocked site. */
     fun isBrowserSessionTargeted(

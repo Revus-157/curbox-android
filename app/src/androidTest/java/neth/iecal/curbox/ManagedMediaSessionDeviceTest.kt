@@ -10,6 +10,9 @@ import android.os.Looper
 import androidx.core.app.NotificationManagerCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import kotlinx.coroutines.runBlocking
+import neth.iecal.curbox.data.models.ManagedGroupPolicy
+import neth.iecal.curbox.utils.DataStoreManager
 import neth.iecal.curbox.services.ManagedMediaEnforcement
 import neth.iecal.curbox.services.ManagedMediaNotificationListener
 import neth.iecal.curbox.services.ManagedMediaTarget
@@ -48,7 +51,18 @@ class ManagedMediaSessionDeviceTest {
                 allowedSession.setPlaybackState(pausedState())
             }
         }
+        val store = DataStoreManager(context)
+        val policyOwner = "managed-media-device-test"
+        val keywordPolicy = ManagedGroupPolicy(
+            "site", "keyword_group", "Synthetic site", listOf("debug.example"),
+            System.currentTimeMillis() + 120_000L
+        )
+        val unrelatedAppPolicy = ManagedGroupPolicy(
+            "app", "app_group", "Synthetic app", listOf("com.example.unrelated"),
+            keywordPolicy.expiresAtMs
+        )
         try {
+            runBlocking { store.replaceManagedPoliciesForCaller(policyOwner, listOf(keywordPolicy)) }
             session.setCallback(callback, Handler(Looper.getMainLooper()))
             allowedSession.setCallback(allowedCallback, Handler(Looper.getMainLooper()))
             session.isActive = true
@@ -74,6 +88,35 @@ class ManagedMediaSessionDeviceTest {
                 "Allowed same-package session was changed",
                 awaitState(allowedController, PlaybackState.STATE_PLAYING)
             )
+
+            // A proven background token survives unrelated app-policy addition and removal.
+            ManagedMediaNotificationListener.sendTarget(context, target.copy(retainBrowserSessions = true))
+            Thread.sleep(200L)
+            for (policies in listOf(listOf(keywordPolicy, unrelatedAppPolicy), listOf(keywordPolicy))) {
+                runBlocking { store.replaceManagedPoliciesForCaller(policyOwner, policies) }
+                Thread.sleep(500L)
+                session.setPlaybackState(playingState())
+                assertTrue("Unrelated app-policy change released blocked media", awaitState(controller, PlaybackState.STATE_PAUSED))
+            }
+
+            // The coordinator may refresh first; the later settings callback must keep its token.
+            ManagedMediaNotificationListener.sendTarget(context, target)
+            Thread.sleep(200L)
+            runBlocking { store.replaceManagedPoliciesForCaller(policyOwner, listOf(keywordPolicy.copy(name = "Refreshed site"))) }
+            Thread.sleep(500L)
+            session.setPlaybackState(playingState())
+            assertTrue("Settings erased the fresh coordinator token", awaitState(controller, PlaybackState.STATE_PAUSED))
+
+            // Releasing the actual keyword justification clears attribution without autoplay.
+            runBlocking { store.replaceManagedPoliciesForCaller(policyOwner, listOf(unrelatedAppPolicy)) }
+            Thread.sleep(500L)
+            session.setPlaybackState(playingState())
+            Thread.sleep(300L)
+            assertEquals("Released keyword policy still paused media", PlaybackState.STATE_PLAYING, controller.playbackState?.state)
+            runBlocking { store.replaceManagedPoliciesForCaller(policyOwner, listOf(keywordPolicy)) }
+            Thread.sleep(500L)
+            assertTrue("Released token was reacquired without a new target", awaitState(controller, PlaybackState.STATE_PLAYING))
+            assertTrue("Fresh observation did not reacquire blocked media", awaitTargetPaused(context, controller, target))
 
             // Losing the URI releases the token too; a same-package URI-less session must not
             // be paused merely because the package and old token are still known.
@@ -119,6 +162,7 @@ class ManagedMediaSessionDeviceTest {
                 ).isEmpty()
             )
         } finally {
+            runBlocking { store.replaceManagedPoliciesForCaller(policyOwner, emptyList()) }
             session.isActive = false
             session.release()
             allowedSession.isActive = false

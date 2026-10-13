@@ -256,11 +256,19 @@ class ManagedPolicyTest {
             "site", "keyword_group", "Site", listOf("blocked.example"), 2_000
         )
         val base = Settings(managedGroupPolicies = listOf(policy))
-        val unrelated = base.copy(isReelCounterOn = !base.isReelCounterOn)
+        val unrelated = base.copy(
+            isReelCounterOn = !base.isReelCounterOn,
+            managedGroupPolicies = listOf(policy, ManagedGroupPolicy(
+                "app", "app_group", "App", listOf("com.example.player"), 3_000
+            ))
+        )
 
         assertEquals(
-            ManagedMediaEnforcement.managedPolicyFingerprint(base),
-            ManagedMediaEnforcement.managedPolicyFingerprint(unrelated)
+            setOf("proven"),
+            ManagedMediaEnforcement.revalidateBrowserTokens(
+                unrelated, 1_000, setOf("proven"),
+                mapOf("proven" to "https://blocked.example/watch")
+            )
         )
     }
 
@@ -275,13 +283,34 @@ class ManagedPolicyTest {
             managedGroupPolicies = listOf(policy.copy(members = listOf("other.example")))
         )
 
-        assertNotEquals(
-            ManagedMediaEnforcement.managedPolicyFingerprint(base),
-            ManagedMediaEnforcement.managedPolicyFingerprint(released)
-        )
-        assertNotEquals(
-            ManagedMediaEnforcement.managedPolicyFingerprint(base),
-            ManagedMediaEnforcement.managedPolicyFingerprint(replaced)
-        )
+        for (settings in listOf(released, replaced)) {
+            assertTrue(ManagedMediaEnforcement.revalidateBrowserTokens(
+                settings, 1_000, setOf("proven"),
+                mapOf("proven" to "https://blocked.example/watch")
+            ).isEmpty())
+        }
+        assertTrue(ManagedMediaEnforcement.revalidateBrowserTokens(
+            base, 2_000, setOf("proven"),
+            mapOf("proven" to "https://blocked.example/watch")
+        ).isEmpty())
+    }
+
+    @Test
+    fun currentPolicyRevalidationRetainsFreshCoordinatorTokensButNeverAcquiresNewOnes() {
+        val settings = Settings(managedGroupPolicies = listOf(ManagedGroupPolicy(
+            "site", "keyword_group", "Site", listOf("blocked.example/watch"), 2_000
+        )))
+        assertEquals(setOf("fresh"), ManagedMediaEnforcement.revalidateBrowserTokens(
+            settings, 1_000, setOf("fresh", "missing", "allowed"), mapOf(
+                "fresh" to "https://blocked.example/watch",
+                "new" to "https://blocked.example/watch",
+                "missing" to null,
+                "allowed" to "https://blocked.example/allowed"
+            )
+        ))
+        assertTrue(ManagedMediaEnforcement.revalidateBrowserTokens(
+            settings.copy(managedGroupPolicies = emptyList()), 1_000, setOf("fresh"),
+            mapOf("fresh" to "https://blocked.example/watch")
+        ).isEmpty())
     }
 }

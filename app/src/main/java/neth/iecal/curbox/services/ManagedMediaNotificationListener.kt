@@ -23,7 +23,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import neth.iecal.curbox.api.ManagedMediaCapability
 import neth.iecal.curbox.data.models.MANAGED_GROUP_PREFIX
-import neth.iecal.curbox.data.models.ManagedGroupPolicy
 import neth.iecal.curbox.data.models.Settings
 import neth.iecal.curbox.data.models.effectiveManagedSettings
 import neth.iecal.curbox.utils.DataStoreManager
@@ -49,8 +48,6 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
     private var browserAttributionExpiresAtMs: Long? = null
     private val connectionEpoch = ManagedMediaConnectionEpoch()
     private var targetGeneration = 0L
-    private var settingsInitialized = false
-    private var managedPolicyFingerprint: Set<ManagedGroupPolicy> = emptySet()
     private var latestPolicySettings: Settings? = null
     private var settingsJob: kotlinx.coroutines.Job? = null
     private var policyExpiryCheck: Runnable? = null
@@ -270,23 +267,14 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
 
     private fun startPolicyMonitoring(epoch: Long) {
         stopPolicyMonitoring()
-        settingsInitialized = false
-        managedPolicyFingerprint = emptySet()
         settingsJob = scope.launch {
             DataStoreManager(applicationContext).settings.collectLatest { settings ->
                 handler.post {
                     if (!connectionEpoch.accepts(epoch)) return@post
                     val now = System.currentTimeMillis()
-                    val currentFingerprint = ManagedMediaEnforcement.managedPolicyFingerprint(settings)
-                    if (settingsInitialized && managedPolicyFingerprint != currentFingerprint) {
-                        // A settings change may revoke or replace the policy that justified
-                        // browser attribution. Unrelated user settings and heartbeat emissions
-                        // keep the same managed justification and therefore retain the target.
-                        clearBrowserAttribution()
-                    }
-                    managedPolicyFingerprint = currentFingerprint
+                    // Refresh revalidates existing tokens against their current URI and the
+                    // current keyword policies, regardless of coordinator/settings ordering.
                     latestPolicySettings = settings
-                    settingsInitialized = true
                     refreshManagedPolicy(settings, now, epoch)
                 }
             }
@@ -299,8 +287,6 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
         policyExpiryCheck?.let(handler::removeCallbacks)
         policyExpiryCheck = null
         latestPolicySettings = null
-        settingsInitialized = false
-        managedPolicyFingerprint = emptySet()
     }
 
     private fun refreshManagedPolicy(settings: Settings, nowMs: Long, epoch: Long) {
@@ -316,6 +302,15 @@ class ManagedMediaNotificationListener : NotificationListenerService() {
         if (browserAttributionExpired(nowMs)) {
             clearBrowserAttribution()
         }
+        browserAttributionSessionTokens = ManagedMediaEnforcement.revalidateBrowserTokens(
+            settings,
+            nowMs,
+            browserAttributionSessionTokens,
+            callbacks.keys.associate { controller ->
+                controller.sessionToken to
+                    controller.metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI)
+            }
+        )
         policyExpiryCheck?.let(handler::removeCallbacks)
         policyExpiryCheck = null
         val nextExpiry = settings.managedGroupPolicies
